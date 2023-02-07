@@ -1,3 +1,1 @@
-export function array(v) {
-    return v.value
-}
+export function array(v) { return v.value }
