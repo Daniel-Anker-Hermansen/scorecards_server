@@ -1,6 +1,9 @@
 use std::panic::set_hook;
 
+use js_sys::Error;
+
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader};
 
 #[wasm_bindgen(module = "/src/js.js")]
@@ -8,34 +11,27 @@ extern "C" {
     pub fn array(v: &JsValue) -> Vec<u8>;
 }
 
+async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
+    let future = JsFuture::from(window()
+        .ok_or(Error::new("no window"))?
+        .fetch_with_str(url));
+    let stream = Response::from(future.await?)
+        .body()
+        .ok_or(Error::new("no body"))?;
+    let future = JsFuture::from(ReadableStreamDefaultReader::new(&stream)?.read());
+    Ok(array(&future.await?))
+}
+
 #[wasm_bindgen(start)]
-pub fn main() {
+pub async fn main() -> Result<(), Error> {
     set_hook(Box::new(|p| log_1(&p.to_string().into())));
+        
+    let data = get_array("test").await?;
+    let data: Vec<String> = postcard::from_bytes(&data)
+        .map_err(|e| Error::new(&e.to_string()))?;
+    log_1(&format!("{data:?}").into());
 
-    let str = "Hi mom from wasm!";
-    web_sys::console::log_1(&str.into());
-    let closure = Closure::<dyn FnMut(JsValue)>::new(|v| {
-        let closure = Closure::<dyn FnMut(JsValue)>::new(|v| {
-            let array = array(&v);
-            let data: Vec<String> = postcard::from_bytes(&array).unwrap();
-            log_1(&format!("{data:?}").into());
-        });
-
-        let response = Response::from(v);
-        let stream = response.body().unwrap();
-        let readable = ReadableStreamDefaultReader::new(&stream).unwrap();
-        readable.read()
-            .then(&closure)
-            .constructor();
-        closure.forget();
-    });
-
-    window().unwrap().fetch_with_str("test")
-        .then(&closure)
-        .constructor();
-    closure.forget();
-
-    //append_paragraph("hi");
+    Ok(())
 }
 
 #[allow(unused)]

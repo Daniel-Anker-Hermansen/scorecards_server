@@ -11,7 +11,9 @@ crate-type = ["cdylib"]
 [dependencies]
 js-sys = "0.3.61"
 postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
+serde = "*"
 wasm-bindgen = "0.2.84"
+wasm-bindgen-futures = "*"
 web-sys = { version = "0.3.61", features = [
     "console",
     "XmlHttpRequest",
