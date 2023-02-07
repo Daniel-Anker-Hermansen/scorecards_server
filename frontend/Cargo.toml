@@ -10,8 +10,19 @@ crate-type = ["cdylib"]
 
 [dependencies]
 js-sys = "0.3.61"
+postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
 wasm-bindgen = "0.2.84"
-web-sys = { version = "0.3.61", features = ["console"] }
+web-sys = { version = "0.3.61", features = [
+    "console",
+    "XmlHttpRequest",
+    "Document",
+    "Window",
+    "Element",
+    "Node",
+    "Response",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+] }
 
 [profile.release]
 opt-level = "s"

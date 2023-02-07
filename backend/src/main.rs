@@ -1,5 +1,5 @@
 use std::{env::args, fs::read_to_string};
-use actix_web::{web::{Data, Query}, Responder, get, HttpServer, App, dev::Response, http::StatusCode, body::MessageBody};
+use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone)]
@@ -26,7 +26,7 @@ struct CodeReceiver {
 
 #[get("/validated")]
 async fn validated(config: Data<Config>, query: Query<CodeReceiver>) -> impl Responder {
-    let oauth = wca_oauth::OAuth::get_auth(config.client_id.clone(), 
+    /*let oauth = wca_oauth::OAuth::get_auth(config.client_id.clone(), 
         config.client_secret.clone(), 
         config.redirect_uri.clone(), 
         query.code.clone())
@@ -36,7 +36,38 @@ async fn validated(config: Data<Config>, query: Query<CodeReceiver>) -> impl Res
     competitions.iter()
         .map(|c| c.name())
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n")*/
+    let body = include_str!("../index.html");
+    Response::build(StatusCode::OK)
+        .content_type("html")
+        .message_body(MessageBody::boxed(body))
+        .unwrap()
+}
+
+#[get("/test")]
+async fn test() -> impl Responder {
+    let data = vec!["hi", "mom", "third string with not only æscii"];
+    postcard::to_allocvec(&data).unwrap()
+}
+
+#[get("/pkg/{file:.*}")]
+async fn pkg(path: Path<String>) -> impl Responder {
+    let file_path = format!("pkg/{path}");
+    dbg!(&file_path);
+    let data = std::fs::read(file_path).unwrap();
+    let mime = if path.ends_with(".js") {
+        "text/javascript"
+    }
+    else if path.ends_with(".wasm") {
+        "application/wasm"
+    }
+    else {
+        panic!("file type is {path}");
+    };
+    Response::build(StatusCode::OK)
+        .content_type(mime)
+        .message_body(MessageBody::boxed(data))
+        .unwrap()
 }
 
 #[tokio::main]
@@ -49,6 +80,8 @@ async fn main() {
             App::new()
                 .service(root)
                 .service(validated)
+                .service(pkg)
+                .service(test)
                 .app_data(Data::new(config))
         })
         .bind(("127.0.0.1", 8080)).unwrap()
