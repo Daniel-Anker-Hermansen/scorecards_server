@@ -2,8 +2,9 @@
 <html>
     <head>
         <script type = "module">
-            import init from "./pkg/frontend.js";
-            init();
+            import init, { main } from "./pkg/frontend.js";
+            init()
+                .then(() => main("SESSION"));
         </script>
     </head>
     <body>

@@ -9,6 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+common = { path = "../common" }
 js-sys = "0.3.61"
 postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
 serde = "*"

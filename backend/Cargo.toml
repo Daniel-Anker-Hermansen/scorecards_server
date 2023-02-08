@@ -12,3 +12,5 @@ wca_oauth = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib" }
 tokio = { version = "1.25.0", features = ["full"] }
 actix-web = "4.3.0"
 postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
+common = { path = "../common" }
+rand = "0.7"

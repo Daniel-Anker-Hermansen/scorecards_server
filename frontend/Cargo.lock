@@ -21,9 +21,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "frontend"
 version = "0.1.0"
 dependencies = [
+ "common",
  "js-sys",
  "postcard",
  "serde",

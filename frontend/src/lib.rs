@@ -1,5 +1,6 @@
 use std::panic::set_hook;
 
+use common::CompetitionInfo;
 use js_sys::{Error, Object, Array, Uint8Array, JsString};
 
 use wasm_bindgen::prelude::*;
@@ -26,15 +27,18 @@ async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
     Ok(fina.to_vec())
 }
 
-#[wasm_bindgen(start)]
-pub async fn main() -> Result<(), Error> {
+#[wasm_bindgen]
+pub async fn main(session: &str) -> Result<(), Error> {
     set_hook(Box::new(|p| log_1(&p.to_string().into())));
         
-    let data = get_array("test").await?;
-    let data: Vec<String> = postcard::from_bytes(&data)
+    let url = format!("{session}/competitions");
+    let data = get_array(&url).await?;
+    let data: Vec<CompetitionInfo> = postcard::from_bytes(&data)
         .map_err(|e| Error::new(&e.to_string()))?;
-    log_1(&format!("{data:?}").into());
-
+    for c in data {
+        log_1(&c.name.into());
+        log_1(&c.id.into());
+    }
     Ok(())
 }
 
