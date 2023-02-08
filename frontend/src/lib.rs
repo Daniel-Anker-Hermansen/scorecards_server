@@ -1,15 +1,10 @@
 use std::panic::set_hook;
 
-use js_sys::Error;
+use js_sys::{Error, Object, Array, Uint8Array, JsString};
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader};
-
-#[wasm_bindgen(module = "/src/js.js")]
-extern "C" {
-    pub fn array(v: &JsValue) -> Vec<u8>;
-}
 
 async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
     let future = JsFuture::from(window()
@@ -19,7 +14,16 @@ async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
         .body()
         .ok_or(Error::new("no body"))?;
     let future = JsFuture::from(ReadableStreamDefaultReader::new(&stream)?.read());
-    Ok(array(&future.await?))
+    let object: Object = future.await?.into();
+    let array = Object::entries(&object);
+    let inner: Array = array.find(&mut |val, _, _| {
+        let array: Array = val.into();
+        let key: JsString = array.at(0).into();
+        let string = key.to_string();
+        string == "value"
+    }).into();
+    let fina: Uint8Array = inner.at(1).into();
+    Ok(fina.to_vec())
 }
 
 #[wasm_bindgen(start)]
