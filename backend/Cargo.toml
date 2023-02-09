@@ -10,7 +10,9 @@ serde = { version = "1.0.152", features = ["derive"] }
 toml = "0.7.1"
 wca_oauth = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib" }
 tokio = { version = "1.25.0", features = ["full"] }
-actix-web = "4.3.0"
+actix-web = { version = "4.3.0", features = ["rustls"] }
 postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
 common = { path = "../common" }
 rand = "0.7"
+rustls = "0.20.8"
+rustls-pemfile = "1.0.2"
