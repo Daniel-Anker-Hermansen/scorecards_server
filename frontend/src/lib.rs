@@ -5,7 +5,7 @@ use js_sys::{Error, Object, Array, Uint8Array, JsString};
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader};
+use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader, Event, Document, Element};
 
 async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
     let future = JsFuture::from(window()
@@ -36,18 +36,43 @@ pub async fn main(session: &str) -> Result<(), Error> {
     let data: Vec<CompetitionInfo> = postcard::from_bytes(&data)
         .map_err(|e| Error::new(&e.to_string()))?;
     for c in data {
-        log_1(&c.name.into());
-        log_1(&c.id.into());
+        append_competition(&c)?;
     }
     Ok(())
 }
 
-#[allow(unused)]
-fn append_paragraph(data: &str) {
-    let document = web_sys::window().unwrap()
-        .document().unwrap();
-    let element = document.create_element("p").unwrap();
-    element.set_text_content(Some(data));
-    document.get_element_by_id("main").unwrap()
-        .append_child(&element).unwrap();
+fn append_competition(competition: &CompetitionInfo) -> Result<(), Error> {
+    let document = document();
+    let closure = Closure::once(competition_on_click);
+    let div = document.create_element("div")?;
+        div.add_event_listener_with_callback("click", closure.into_js_value().unchecked_ref())?;
+    let text = document.create_element("text")?;
+    let main = document.get_element_by_id("main")
+        .unwrap();
+    div.set_id(&competition.id);
+    text.set_text_content(Some(&competition.name));
+    div.append_child(&text)?;
+    main.append_child(&div)?;
+    Ok(())
+}
+
+fn competition_on_click(event: &Event) {
+    let target = event.current_target()
+        .unwrap();
+    let div: Element = target.unchecked_into();
+    log_1(&div.id().into());
+    let main = document()
+        .get_element_by_id("main")
+        .unwrap();
+    while let Some(child) = main.last_child() {
+        main.remove_child(&child)
+            .unwrap();
+    }
+}
+
+fn document() -> Document {
+    window()
+        .unwrap()
+        .document()
+        .unwrap()
 }

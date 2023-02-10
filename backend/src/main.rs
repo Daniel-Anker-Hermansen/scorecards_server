@@ -104,6 +104,7 @@ async fn main() {
         .with_single_cert(vec![certificate], private_key)
         .unwrap();
 
+    dbg!("about to start server");
     HttpServer::new(move || {
             let config = config.clone();
             let db = Mutex::new(DB::new(config));
