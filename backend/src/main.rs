@@ -15,8 +15,8 @@ struct Config {
     client_secret: String,
     redirect_uri: String,
     auth_url: String,
-    public_pem_path: String,
-    private_pem_path: String,
+    public_pem_path: Option<String>,
+    private_pem_path: Option<String>,
 }
 
 #[get("/")]
@@ -109,24 +109,9 @@ async fn main() {
     let config_data = read_to_string(config_path).expect("Config file is not valid utf8");
     let config: Config = toml::from_str(&config_data).unwrap();
 
-    let public_data = read_to_string(&config.public_pem_path).unwrap();
-    let mut cursor = Cursor::new(public_data);
-    let pem = certs(&mut cursor).unwrap();
-    let certificate = Certificate(pem[0].clone());
-    
-    let private_data = read_to_string(&config.private_pem_path).unwrap();
-    let mut cursor = Cursor::new(private_data);
-    let pem = pkcs8_private_keys(&mut cursor).unwrap();
-    let private_key = PrivateKey(pem[0].clone());
-    
-    let server_config = ServerConfig::builder()
-        .with_safe_defaults()
-        .with_no_client_auth()
-        .with_single_cert(vec![certificate], private_key)
-        .unwrap();
-
-    dbg!("about to start server");
-    HttpServer::new(move || {
+    let public = config.public_pem_path.clone();
+    let private = config.private_pem_path.clone();
+    let server = HttpServer::new(move || {
             let config = config.clone();
             let db = Mutex::new(DB::new(config));
             App::new()
@@ -136,10 +121,38 @@ async fn main() {
                 .service(competitions)
                 .service(rounds)
                 .app_data(Data::new(db))
-        })
-        .bind_rustls(("127.0.0.1", 8080), server_config)
-        .unwrap()
-        .run()
-        .await
-        .unwrap();
+        });
+
+    if let (Some(public), Some(private)) = (public, private) {
+        let public_data = read_to_string(&public).unwrap();
+        let mut cursor = Cursor::new(public_data);
+        let pem = certs(&mut cursor).unwrap();
+        let certificate = Certificate(pem[0].clone());
+    
+        let private_data = read_to_string(&private).unwrap();
+        let mut cursor = Cursor::new(private_data);
+        let pem = pkcs8_private_keys(&mut cursor).unwrap();
+        let private_key = PrivateKey(pem[0].clone());
+
+        let server_config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(vec![certificate], private_key)
+            .unwrap();
+
+        server
+            .bind_rustls(("127.0.0.1", 8080), server_config)
+            .unwrap()
+            .run()
+            .await
+            .unwrap();
+
+    }
+    else {
+        server.bind(("127.0.0.1", 8080))
+            .unwrap()
+            .run()
+            .await
+            .unwrap();
+    }
 }
