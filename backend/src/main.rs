@@ -2,7 +2,7 @@ mod db;
 
 use std::{env::args, fs::read_to_string, io::Cursor};
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
-use common::CompetitionInfo;
+use common::{CompetitionInfo, RoundInfo};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -62,6 +62,27 @@ async fn competitions(db: Data<Mutex<DB>>, path: Path<u64>) -> impl Responder {
     postcard::to_allocvec(&data).unwrap()
 }
 
+#[get("{session}/{competition}/rounds")]
+async fn rounds(db: Data<Mutex<DB>>, path:Path<(u64, String)>) -> impl Responder {
+    let mut lock = db.lock().await;
+    let path_inner = &path.into_inner();
+    let session = lock.session_mut(path_inner.0)
+        .unwrap();
+    let wcif = session.oauth_mut()
+        .get_wcif(&path_inner.1)
+        .await
+        .unwrap();
+    let rounds: Vec<_> = wcif.round_iter()
+        .map(|round| {
+            RoundInfo {
+                name: round.id.clone(),
+                previous_is_done: true,
+            }
+        })
+        .collect();
+    postcard::to_allocvec(&rounds).unwrap()
+}
+
 #[get("/pkg/{file:.*}")]
 async fn pkg(path: Path<String>) -> impl Responder {
     let file_path = format!("pkg/{path}");
@@ -113,6 +134,7 @@ async fn main() {
                 .service(validated)
                 .service(pkg)
                 .service(competitions)
+                .service(rounds)
                 .app_data(Data::new(db))
         })
         .bind_rustls(("127.0.0.1", 8080), server_config)

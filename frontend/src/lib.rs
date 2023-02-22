@@ -1,10 +1,10 @@
 use std::panic::set_hook;
 
-use common::CompetitionInfo;
+use common::{CompetitionInfo, RoundInfo};
 use js_sys::{Error, Object, Array, Uint8Array, JsString};
 
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader, Event, Document, Element};
 
 async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
@@ -30,8 +30,8 @@ async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
 #[wasm_bindgen]
 pub async fn main(session: &str) -> Result<(), Error> {
     set_hook(Box::new(|p| log_1(&p.to_string().into())));
-        
-    let url = format!("{session}/competitions");
+    set_session(session);
+    let url = format!("{}/competitions", session);
     let data = get_array(&url).await?;
     let data: Vec<CompetitionInfo> = postcard::from_bytes(&data)
         .map_err(|e| Error::new(&e.to_string()))?;
@@ -56,18 +56,30 @@ fn append_competition(competition: &CompetitionInfo) -> Result<(), Error> {
     Ok(())
 }
 
-fn competition_on_click(event: &Event) {
-    let target = event.current_target()
-        .unwrap();
-    let div: Element = target.unchecked_into();
-    log_1(&div.id().into());
-    let main = document()
-        .get_element_by_id("main")
-        .unwrap();
-    while let Some(child) = main.last_child() {
-        main.remove_child(&child)
+fn competition_on_click(event: Event) {
+    let inner = async move { 
+        let target = event.current_target()
             .unwrap();
-    }
+        let div: Element = target.unchecked_into();
+        log_1(&div.id().into());
+        let url = format!("{}/{}/rounds", session(), div.id());
+        let bytes = get_array(&url)
+            .await
+            .unwrap();
+        let round_info: Vec<RoundInfo> = postcard::from_bytes(&bytes)
+            .unwrap();
+        for round in round_info {
+            log_1(&round.name.into());
+        }
+        let main = document()
+            .get_element_by_id("main")
+            .unwrap();
+        while let Some(child) = main.last_child() {
+            main.remove_child(&child)
+                .unwrap();
+        }
+    };
+    spawn_local(inner);
 }
 
 fn document() -> Document {
@@ -75,4 +87,16 @@ fn document() -> Document {
         .unwrap()
         .document()
         .unwrap()
+}
+
+static mut SESSION: u64 = 0;
+
+fn set_session(session: &str) {
+    unsafe {
+        SESSION = session.parse().unwrap()
+    }
+}
+
+fn session() -> u64 {
+    unsafe { SESSION }
 }
