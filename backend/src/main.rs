@@ -1,14 +1,14 @@
 mod db;
 
-use std::{env::args, fs::read_to_string, io::Cursor};
-use actix_web::{web::{Data, Query, Path, Bytes}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
+use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
+use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde::Deserialize;
-use tokio::sync::Mutex;
+use tokio::{sync::Mutex, join, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 use scorecard_to_pdf::Return;
 
@@ -24,7 +24,7 @@ struct Config {
 }
 
 #[get("/")]
-async fn root(db: Data<Mutex<DB>>) -> impl Responder {
+async fn root(db: Data<Arc<Mutex<DB>>>) -> impl Responder {
     let lock = db.lock().await;
     let config = lock.config();
     let body = format!("<script>window.location.href=\"{}\"</script>", &config.auth_url);
@@ -40,7 +40,7 @@ struct CodeReceiver {
 }
 
 #[get("/validated")]
-async fn validated(db: Data<Mutex<DB>>, query: Query<CodeReceiver>) -> impl Responder {
+async fn validated(db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
     let mut lock = db.lock().await;
     let session = lock.insert_session(query.code.clone()).await;
     let body = include_str!("../index.html").replace("SESSION", &session.to_string());
@@ -51,7 +51,7 @@ async fn validated(db: Data<Mutex<DB>>, query: Query<CodeReceiver>) -> impl Resp
 }
 
 #[get("{session}/competitions")]
-async fn competitions(db: Data<Mutex<DB>>, path: Path<u64>) -> impl Responder {
+async fn competitions(db: Data<Arc<Mutex<DB>>>, path: Path<u64>) -> impl Responder {
     let mut lock = db.lock().await;
     let session = lock.session_mut(path.into_inner())
         .unwrap();
@@ -67,7 +67,7 @@ async fn competitions(db: Data<Mutex<DB>>, path: Path<u64>) -> impl Responder {
 }
 
 #[get("{session}/{competition}/rounds")]
-async fn rounds(db: Data<Mutex<DB>>, path:Path<(u64, String)>) -> impl Responder {
+async fn rounds(db: Data<Arc<Mutex<DB>>>, path:Path<(u64, String)>) -> impl Responder {
     let mut lock = db.lock().await;
     let path_inner = &path.into_inner();
     let session = lock.session_mut(path_inner.0)
@@ -89,9 +89,9 @@ async fn rounds(db: Data<Mutex<DB>>, path:Path<(u64, String)>) -> impl Responder
 }
 
 #[get("{session}/{competition}/{round}/competitors")]
-async fn competitors(db: Data<Mutex<DB>>, path: Path<(u64, String, String)>) -> impl Responder {
+async fn competitors(db: Data<Arc<Mutex<DB>>>, path: Path<(u64, String, String)>) -> impl Responder {
     let mut lock = db.lock().await;
-    let (session, competition, round) = &path.into_inner();
+    let (session, _, round) = &path.into_inner();
     let session = lock.session_mut(*session)
         .unwrap();
     let wcif = session.wcif_mut().as_mut().unwrap();
@@ -114,7 +114,7 @@ struct PdfRequest64 {
 }
 
 #[get("/submit")]
-async fn pdf(query: Query<PdfRequest64>, db: Data<Mutex<DB>>) -> impl Responder {
+async fn pdf(query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
     let body = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new()).decode(&query.data).unwrap();
     let pdf_request: PdfRequest = postcard::from_bytes(&body).unwrap();
     let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
@@ -155,7 +155,7 @@ async fn pdf(query: Query<PdfRequest64>, db: Data<Mutex<DB>>) -> impl Responder 
 }
 
 #[get("/pkg/{file:.*}")]
-async fn pkg(path: Path<String>, db: Data<Mutex<DB>>) -> impl Responder {
+async fn pkg(path: Path<String>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
     let lock = db.lock().await;
     let pkg_path = &lock.config().pkg_path;
     let file_path = format!("{pkg_path}/{path}");
@@ -184,9 +184,10 @@ async fn main() {
 
     let public = config.public_pem_path.clone();
     let private = config.private_pem_path.clone();
+    let db = Arc::new(Mutex::new(DB::new(config.clone())));
+    let db_arc = db.clone();
     let server = HttpServer::new(move || {
-            let config = config.clone();
-            let db = Mutex::new(DB::new(config));
+            let db_arc = db_arc.clone();
             App::new()
                 .service(root)
                 .service(validated)
@@ -195,10 +196,10 @@ async fn main() {
                 .service(rounds)
                 .service(competitors)
                 .service(pdf)
-                .app_data(Data::new(db))
+                .app_data(Data::new(db_arc))
         });
 
-    if let (Some(public), Some(private)) = (public, private) {
+    let future = async { if let (Some(public), Some(private)) = (public, private) {
         let public_data = read_to_string(&public).unwrap();
         let mut cursor = Cursor::new(public_data);
         let pem = certs(&mut cursor).unwrap();
@@ -229,5 +230,17 @@ async fn main() {
             .run()
             .await
             .unwrap();
-    }
+    }};
+
+    let garbage_collecter = async move {
+        let mut interval = interval(Duration::from_secs(600));
+        loop {
+            interval.tick().await;
+            let mut lock = db.lock().await;
+            lock.clean();
+            drop(lock);
+        }
+    };
+
+    join!(future, garbage_collecter);
 }
