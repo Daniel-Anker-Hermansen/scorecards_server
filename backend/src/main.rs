@@ -1,13 +1,15 @@
 mod db;
 
 use std::{env::args, fs::read_to_string, io::Cursor};
-use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
-use common::{CompetitionInfo, RoundInfo};
+use actix_web::{web::{Data, Query, Path, Bytes}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
+use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde::Deserialize;
 use tokio::sync::Mutex;
+use wca_scorecards_lib::{ScorecardOrdering, Stages};
+use scorecard_to_pdf::Return;
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
@@ -80,7 +82,58 @@ async fn rounds(db: Data<Mutex<DB>>, path:Path<(u64, String)>) -> impl Responder
             }
         })
         .collect();
+    *session.wcif_mut() = Some(wcif);
     postcard::to_allocvec(&rounds).unwrap()
+}
+
+#[get("{session}/{competition}/{round}/competitors")]
+async fn competitors(db: Data<Mutex<DB>>, path: Path<(u64, String, String)>) -> impl Responder {
+    let mut lock = db.lock().await;
+    let (session, competition, round) = &path.into_inner();
+    let session = lock.session_mut(*session)
+        .unwrap();
+    let wcif = session.wcif_mut().as_mut().unwrap();
+    let mut iter = round.split('-');
+    let event = iter.next().unwrap();
+    let round = iter.next().unwrap()[1..].parse().unwrap();
+    let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, event, round);
+    let delegates = wcif.reg_ids_of_delegates();
+    let result = Competitors {
+        competitors: competitors.into_iter().map(|z| z as u64).collect(),
+        names: names.into_iter().map(|(z, s)| (z as u64, s)).collect(),
+        delegates: delegates.into_iter().map(|z| z as u64).collect(),
+    };
+    postcard::to_allocvec(&result).unwrap()
+}
+
+#[get("submit")]
+async fn pdf(bytes: Bytes, db: Data<Mutex<DB>>) -> impl Responder {
+    let body = bytes.to_vec();
+    let pdf_request: PdfRequest = postcard::from_bytes(&body).unwrap();
+    let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
+    let mut lock = db.lock().await;
+    let mut session = lock
+        .session_mut(pdf_request.session)
+        .unwrap();
+    let oauth = unsafe { std::ptr::read(session.oauth_mut() as *mut _) };
+    let mut wcif_oauth = session.wcif_mut()
+        .take()
+        .unwrap()
+        .add_oauth(oauth);
+    let pdf = wca_scorecards_lib::generate_pdf(
+        &pdf_request.event, 
+        pdf_request.round as usize, 
+        pdf_request.groups.into_iter()
+            .map(|z| z.into_iter().map(|z| z as usize).collect())
+            .collect(), 
+        pdf_request.wcif, 
+        &mut wcif_oauth, 
+        &stages, 
+        ScorecardOrdering::Default).await;
+    match pdf {
+        Return::Pdf(z) => z,
+        Return::Zip(z) => z,
+    }
 }
 
 #[get("/pkg/{file:.*}")]
@@ -120,6 +173,7 @@ async fn main() {
                 .service(pkg)
                 .service(competitions)
                 .service(rounds)
+                .service(competitors)
                 .app_data(Data::new(db))
         });
 

@@ -9,6 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+base64 = "0.21.0"
 common = { path = "../common" }
 js-sys = "0.3.61"
 postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
@@ -27,6 +28,11 @@ web-sys = { version = "0.3.61", features = [
     "ReadableStreamDefaultReader",
     "Event",
     "EventTarget",
+    "HtmlInputElement",
+    "HtmlTableElement",
+    "HtmlCollection",
+    "HtmlTableRowElement",
+    "RequestInit",
 ] }
 
 [profile.release]

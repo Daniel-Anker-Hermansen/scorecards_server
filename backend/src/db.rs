@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rand::{thread_rng, Rng};
-use wca_oauth::OAuth;
+use wca_oauth::{OAuth, WcifContainer};
 
 use crate::Config;
 
@@ -44,14 +44,19 @@ impl DB {
 
 pub(crate) struct Session {
     oauth: OAuth,
+    wcif: Option<WcifContainer>,
 }
 
 impl Session {
     fn new(oauth: OAuth) -> Session {
-        Session { oauth }   
+        Session { oauth, wcif: None }   
     }
 
     pub fn oauth_mut(&mut self) -> &mut OAuth {
         &mut self.oauth
+    }
+
+    pub fn wcif_mut(&mut self) -> &mut Option<WcifContainer> {
+        &mut self.wcif
     }
 }
