@@ -1957,6 +1957,7 @@ checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 [[package]]
 name = "scorecard_to_pdf"
 version = "0.3.0"
+source = "git+https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib#cfe8ba59d0b77d91aba5e2a797f320a65836d0c1"
 dependencies = [
  "font-kit",
  "printpdf",
@@ -2801,6 +2802,7 @@ checksum = "0046fef7e28c3804e5e38bfa31ea2a0f73905319b677e57ebe37e49358989b5d"
 [[package]]
 name = "wca_oauth"
 version = "0.1.4"
+source = "git+https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib#cfe8ba59d0b77d91aba5e2a797f320a65836d0c1"
 dependencies = [
  "reqwest",
  "serde",
@@ -2811,6 +2813,7 @@ dependencies = [
 [[package]]
 name = "wca_scorecards_lib"
 version = "0.8.6"
+source = "git+https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib#cfe8ba59d0b77d91aba5e2a797f320a65836d0c1"
 dependencies = [
  "open",
  "scorecard_to_pdf",

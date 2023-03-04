@@ -1,11 +1,12 @@
-use std::{panic::set_hook, sync::{Arc, Mutex, MutexGuard}, collections::{HashSet, HashMap}};
+use std::{panic::set_hook, sync::{Arc, Mutex}, collections::{HashSet, HashMap}};
 
+use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
 use js_sys::{Error, Object, Array, Uint8Array, JsString};
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader, Event, Document, Element, HtmlInputElement, HtmlTableElement, HtmlTableRowElement, RequestInit};
+use web_sys::{console::log_1, window, Response, ReadableStreamDefaultReader, Event, Document, Element, HtmlInputElement, HtmlTableElement, HtmlTableRowElement, HtmlElement};
 
 async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
     let future = JsFuture::from(window()
@@ -25,32 +26,6 @@ async fn get_array(url: &str) -> Result<Vec<u8>, Error> {
     }).into();
     let fina: Uint8Array = inner.at(1).into();
     Ok(fina.to_vec())
-}
-
-async fn send_request_internal(url: &str, init: RequestInit) -> Result<Vec<u8>, Error> {
-    let future = JsFuture::from(window()
-        .ok_or(Error::new("no window"))?
-        .fetch_with_str_and_init(url, &init));
-    let stream = Response::from(future.await?)
-        .body()
-        .ok_or(Error::new("no body"))?;
-    let future = JsFuture::from(ReadableStreamDefaultReader::new(&stream)?.read());
-    let object: Object = future.await?.into();
-    let array = Object::entries(&object);
-    let inner: Array = array.find(&mut |val, _, _| {
-        let array: Array = val.into();
-        let key: JsString = array.at(0).into();
-        let string = key.to_string();
-        string == "value"
-    }).into();
-    let fina: Uint8Array = inner.at(1).into();
-    Ok(fina.to_vec())
-}
-
-async fn send_request(url: &str, body: Vec<u8>) -> Result<Vec<u8>, Error> {
-    let mut init = RequestInit::new();
-    init.body(Some(&Uint8Array::from(&body[..])));
-    send_request_internal(url, init).await
 }
 
 #[wasm_bindgen]
@@ -156,11 +131,11 @@ fn round_on_click(event: Event) {
             .flat_map(|t| t.split("/"));
         let event = iter.nth(1).unwrap().to_owned();
         let round = iter.next().unwrap()[1..].parse().unwrap();
-        let round_config = RoundConfig { stages, stations, groups, names: result.names, patch: false, event, round };
+        let round_config = RoundConfig { stages, stations, groups, names: result.names, event, round };
         unsafe {
             ROUND_CONFIG = Some(Arc::new(Mutex::new(round_config)));
         }
-        redraw_round_config();
+        redraw_round_config().unwrap();
     };
     spawn_local(inner);
 }
@@ -203,9 +178,27 @@ struct RoundConfig {
     stations: u64,
     groups: Vec<Vec<u64>>,
     names: HashMap<u64, String>,
-    patch: bool,
     event: String,
     round: u64,
+}
+
+fn move_competitor(event: Event) {
+    let t = async move {
+        let target: Element = event.current_target()
+            .unwrap()
+            .unchecked_into();
+        let id = target.id();
+        let numbers: Vec<_> = id.split("/").map(|z| z.parse().unwrap()).collect();
+        let group = numbers[0] as _;
+        let number = numbers[1] as _;
+        let translation = numbers[2];
+        get_round_config().lock()
+            .unwrap()
+            .move_competitor(group, number, translation);
+        redraw_round_config().unwrap();
+    };
+    spawn_local(t);
+
 }
 
 fn redraw_round_config() -> Result<(), Error> {
@@ -223,23 +216,55 @@ fn redraw_round_config() -> Result<(), Error> {
     for number in 0..no_of_rows {
         let item: HtmlTableRowElement = rows.item(number as u32).unwrap().unchecked_into();
         for group in 0..no_of_groups {
+            let l_cell = item.insert_cell().unwrap();
             let cell = item.insert_cell().unwrap();
+            let r_cell = item.insert_cell().unwrap();
             match groups[group].get(number) {
-                Some(id) => cell.set_inner_text(&format!("{} ({})", id, names[id])),
+                Some(id) => {
+                    let left_button = document().create_element("button")?;
+                    left_button.set_text_content(Some("<"));
+                    left_button.set_id(&format!("{}/{}/{}", group, number, -1));
+                    let closure = Closure::once(move_competitor);
+                    left_button.add_event_listener_with_callback("click", closure.into_js_value().unchecked_ref())?;
+                    let right_button = document().create_element("button")?;
+                    right_button.set_text_content(Some(">"));
+                    right_button.set_id(&format!("{}/{}/{}", group, number, 1));
+                    let closure = Closure::once(move_competitor);
+                    right_button.add_event_listener_with_callback("click", closure.into_js_value().unchecked_ref())?;
+                    let text = document().create_element("text")?;
+                    text.set_text_content(Some(&format!("{} ({})", id, names[id])));
+                    if group != 0 {
+                        l_cell.append_child(&left_button)?;
+                    }
+                    cell.append_child(&text)?;
+                    if group != no_of_groups - 1 {
+                        r_cell.append_child(&right_button)?;
+                    }
+
+                },
                 None => (),
             } 
         }
     }
     remove_all_children("main");
-    document().get_element_by_id("main")
-        .unwrap()
-        .append_child(&table)?;
+    let main = document().get_element_by_id("main")
+        .unwrap();
+    main.append_child(&table)?;
     let submit = document().create_element("button")?;
+    submit.set_text_content(Some("Submit!"));
     let closure = Closure::once(submit_on_click);
     submit.add_event_listener_with_callback("click", &closure.into_js_value().unchecked_ref())?;
-    document().get_element_by_id("main")
-        .unwrap()
-        .append_child(&submit)?;
+    let document = document();
+    let input: HtmlInputElement = document.create_element("input")?.dyn_into().unwrap();
+    input.set_id("checkbox");
+    input.set_type("checkbox");
+    let div = document.create_element("div")?;
+    let txt = document.create_element("text")?;
+    txt.set_text_content(Some("Do you want to patch to wcif?"));
+    div.append_child(&txt)?;
+    div.append_child(&input)?;
+    main.append_child(&div)?;
+    main.append_child(&submit)?;
     Ok(())
 }
 
@@ -253,20 +278,30 @@ fn get_round_config() -> Arc<Mutex<RoundConfig>> {
 
 fn submit_on_click() {
     let t = async {
+        let checkbox: HtmlInputElement = document().get_element_by_id("checkbox")
+            .unwrap()
+            .unchecked_into();
         let rc = get_round_config();
         let round_config = rc.lock().unwrap();
         let pdf_request = PdfRequest {
             stages: round_config.stages,
             stations: round_config.stations,
             groups: round_config.submit().unwrap().clone(),
-            wcif: round_config.patch,
+            wcif: checkbox.checked(),
             event: round_config.event.clone(),
             round: round_config.round,
             session: session(),
         };
         let data = postcard::to_allocvec(&pdf_request).unwrap();
-        let data = send_request("submit", data).await;
-        log_1(&format!("{data:?}").into());
+        let base64 = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new()).encode(data);
+        let url = format!("submit?data={base64}");
+
+        let element: HtmlElement = document().create_element("a").unwrap().unchecked_into();
+        element.set_attribute("href", &url).unwrap();
+        document().get_element_by_id("main")
+            .unwrap()
+            .append_child(&element).unwrap();
+        element.click();
     };
     spawn_local(t);
 }

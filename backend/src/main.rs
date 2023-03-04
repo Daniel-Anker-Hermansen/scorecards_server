@@ -2,6 +2,7 @@ mod db;
 
 use std::{env::args, fs::read_to_string, io::Cursor};
 use actix_web::{web::{Data, Query, Path, Bytes}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
+use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
@@ -19,6 +20,7 @@ struct Config {
     auth_url: String,
     public_pem_path: Option<String>,
     private_pem_path: Option<String>,
+    pkg_path: String,
 }
 
 #[get("/")]
@@ -106,13 +108,18 @@ async fn competitors(db: Data<Mutex<DB>>, path: Path<(u64, String, String)>) -> 
     postcard::to_allocvec(&result).unwrap()
 }
 
-#[get("submit")]
-async fn pdf(bytes: Bytes, db: Data<Mutex<DB>>) -> impl Responder {
-    let body = bytes.to_vec();
+#[derive(Deserialize)]
+struct PdfRequest64 {
+    data: String,
+}
+
+#[get("/submit")]
+async fn pdf(query: Query<PdfRequest64>, db: Data<Mutex<DB>>) -> impl Responder {
+    let body = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new()).decode(&query.data).unwrap();
     let pdf_request: PdfRequest = postcard::from_bytes(&body).unwrap();
     let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
     let mut lock = db.lock().await;
-    let mut session = lock
+    let session = lock
         .session_mut(pdf_request.session)
         .unwrap();
     let oauth = unsafe { std::ptr::read(session.oauth_mut() as *mut _) };
@@ -130,15 +137,28 @@ async fn pdf(bytes: Bytes, db: Data<Mutex<DB>>) -> impl Responder {
         &mut wcif_oauth, 
         &stages, 
         ScorecardOrdering::Default).await;
+    let (wcif, oauth) = wcif_oauth.disassemble();
+    std::mem::forget(oauth);
+    *session.wcif_mut() = Some(wcif);
     match pdf {
-        Return::Pdf(z) => z,
-        Return::Zip(z) => z,
+        Return::Pdf(z) => 
+            Response::build(StatusCode::OK)
+                .content_type("application/pdf")
+                .message_body(MessageBody::boxed(z))
+                .unwrap(),
+        Return::Zip(z) => 
+            Response::build(StatusCode::OK)
+                .content_type("application/zip")
+                .message_body(MessageBody::boxed(z))
+                .unwrap(),
     }
 }
 
 #[get("/pkg/{file:.*}")]
-async fn pkg(path: Path<String>) -> impl Responder {
-    let file_path = format!("pkg/{path}");
+async fn pkg(path: Path<String>, db: Data<Mutex<DB>>) -> impl Responder {
+    let lock = db.lock().await;
+    let pkg_path = &lock.config().pkg_path;
+    let file_path = format!("{pkg_path}/{path}");
     dbg!(&file_path);
     let data = std::fs::read(file_path).unwrap();
     let mime = if path.ends_with(".js") {
@@ -174,6 +194,7 @@ async fn main() {
                 .service(competitions)
                 .service(rounds)
                 .service(competitors)
+                .service(pdf)
                 .app_data(Data::new(db))
         });
 

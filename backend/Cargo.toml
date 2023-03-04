@@ -8,9 +8,9 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0.152", features = ["derive"] }
 toml = "0.7.1"
-wca_oauth = { path = "../../WCA_tools_lib/wca_oauth" }
-wca_scorecards_lib = { path = "../../WCA_tools_lib/wca_scorecards_lib" }
-scorecard_to_pdf = { path = "../../WCA_tools_lib/scorecard_to_pdf" }
+wca_oauth = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib" }
+wca_scorecards_lib = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib" }
+scorecard_to_pdf = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib" }
 tokio = { version = "1.25.0", features = ["full"] }
 actix-web = { version = "4.3.0", features = ["rustls"] }
 postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
