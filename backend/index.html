@@ -1,6 +1,20 @@
 <!DOCTYPE html>
 <html>
     <head>
+        <style>
+            .style_list {
+                border: 1px solid black;
+                background-color: #dedede;
+                padding: 5px;
+                margin: 5px;
+                display: flex; /* add display:flex */
+                cursor: pointer; /* set cursor to pointer */
+            }
+            .style_list:hover {
+                background-color: lightgray;
+                border-color: gray;
+            }
+        </style>
         <script type = "module">
             import init, { main } from "./pkg/frontend.js";
             init()

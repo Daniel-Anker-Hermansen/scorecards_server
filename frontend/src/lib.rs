@@ -51,6 +51,7 @@ fn append_competition(competition: &CompetitionInfo) -> Result<(), Error> {
     let main = document.get_element_by_id("main")
         .unwrap();
     div.set_id(&competition.id);
+    div.set_class_name("style_list");
     text.set_text_content(Some(&competition.name));
     div.append_child(&text)?;
     main.append_child(&div)?;
@@ -66,6 +67,7 @@ fn append_round(round: &RoundInfo, competition_name: &str) -> Result<(), Error> 
     let main = document.get_element_by_id("main")
         .unwrap();
     div.set_id(&format!("{}/{}", competition_name, round.name));
+    div.set_class_name("style_list");
     text.set_text_content(Some(&round.name));
     div.append_child(&text)?;
     main.append_child(&div)?;
