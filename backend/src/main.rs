@@ -1,7 +1,7 @@
 mod db;
 
 use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
-use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
+use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
 use db::DB;
@@ -23,11 +23,34 @@ struct Config {
     pkg_path: String,
 }
 
+fn get_cookie(http: &HttpRequest) -> Option<Cookie<'static>> {
+    http.cookies()
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .find(|c| c.name() == "scorecards")
+}
+
+fn create_cookie(code: &str) -> Cookie<'static> {
+    Cookie::build("scorecards", code)
+        .secure(true)
+        .http_only(true)
+        .max_age(time::Duration::hours(1))
+        .finish()
+}
+
 #[get("/")]
-async fn root(db: Data<Arc<Mutex<DB>>>) -> impl Responder {
-    let lock = db.lock().await;
-    let config = lock.config();
-    let body = format!("<script>window.location.href=\"{}\"</script>", &config.auth_url);
+async fn root(http: HttpRequest, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
+    let body = match get_cookie(&http) {
+        Some(_) => {
+            format!("<script>window.location.href=\"validated\"</script>")
+        }
+        None => {
+            let lock = db.lock().await;
+            let config = lock.config();
+            format!("<script>window.location.href=\"{}\"</script>", &config.auth_url)
+        }
+    };
     Response::build(StatusCode::OK)
         .content_type("html")
         .message_body(MessageBody::boxed(body))
@@ -36,15 +59,25 @@ async fn root(db: Data<Arc<Mutex<DB>>>) -> impl Responder {
 
 #[derive(Deserialize)]
 struct CodeReceiver {
-    code: String,
+    code: Option<String>,
 }
 
 #[get("/validated")]
-async fn validated(db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
-    let mut lock = db.lock().await;
-    let session = lock.insert_session(query.code.clone()).await;
-    let body = include_str!("../index.html").replace("SESSION", &session.to_string());
-    Response::build(StatusCode::OK)
+async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
+    let mut builder = match get_cookie(&http) {
+        Some(_) => HttpResponse::build(StatusCode::OK),
+        None => {
+            let mut lock = db.lock().await;
+            let session = lock.insert_session(query.code.clone().unwrap()).await;
+            let body = include_str!("../index.html").replace("SESSION", &session.to_string());
+            let cookie = create_cookie(query.code.as_ref().unwrap());
+            let mut builder = HttpResponse::build(StatusCode::OK);
+            builder.cookie(cookie);
+            builder
+        },
+    };
+
+    builder
         .content_type("html")
         .message_body(MessageBody::boxed(body))
         .unwrap()
