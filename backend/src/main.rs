@@ -1,4 +1,5 @@
 mod db;
+mod html;
 
 use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
@@ -31,7 +32,7 @@ fn get_cookie(http: &HttpRequest) -> Option<Cookie<'static>> {
         .find(|c| c.name() == "scorecards")
 }
 
-fn create_cookie(code: &str) -> Cookie<'static> {
+fn create_cookie(code: &str) -> Cookie {
     Cookie::build("scorecards", code)
         .secure(true)
         .http_only(true)
@@ -64,18 +65,27 @@ struct CodeReceiver {
 
 #[get("/validated")]
 async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
-    let mut builder = match get_cookie(&http) {
-        Some(_) => HttpResponse::build(StatusCode::OK),
+    let cookie = get_cookie(&http);
+    let (mut builder, auth_code) = match cookie {
+        Some(v) => (HttpResponse::build(StatusCode::OK), v.value().to_owned()),
         None => {
             let mut lock = db.lock().await;
-            let session = lock.insert_session(query.code.clone().unwrap()).await;
-            let body = include_str!("../index.html").replace("SESSION", &session.to_string());
+            lock.insert_session(query.code.clone().unwrap()).await;
             let cookie = create_cookie(query.code.as_ref().unwrap());
             let mut builder = HttpResponse::build(StatusCode::OK);
             builder.cookie(cookie);
-            builder
+            (builder, query.code.as_ref().unwrap().clone())
         },
     };
+
+    let mut lock = db.lock().await;
+    let my_competitions = lock.session_mut(&auth_code)
+        .expect("Cookie is not expired")
+        .oauth_mut()
+        .get_competitions_managed_by_me()
+        .await; 
+
+    let body = html::validated(my_competitions);
 
     builder
         .content_type("html")
@@ -83,7 +93,27 @@ async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<Cod
         .unwrap()
 }
 
-#[get("{session}/competitions")]
+#[get("/{competition_id}")]
+async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<String>) -> impl Responder {
+    let cookie = get_cookie(&http).unwrap();
+    let mut lock = db.lock().await;
+    let session = lock.session_mut(cookie.value()).unwrap();
+    let id = path.into_inner();
+    let wcif = session.oauth_mut().get_wcif(&id).await.unwrap();
+    let rounds: Vec<_> = wcif.round_iter()
+        .map(|round| {
+            RoundInfo {
+                name: round.id.clone(),
+                previous_is_done: true,
+            }
+        })
+        .collect();
+    *session.wcif_mut() = Some(wcif); 
+
+    "hi"
+}
+
+/*#[get("{session}/competitions")]
 async fn competitions(db: Data<Arc<Mutex<DB>>>, path: Path<u64>) -> impl Responder {
     let mut lock = db.lock().await;
     let session = lock.session_mut(path.into_inner())
@@ -185,7 +215,7 @@ async fn pdf(query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Respo
                 .message_body(MessageBody::boxed(z))
                 .unwrap(),
     }
-}
+}*/
 
 #[get("/pkg/{file:.*}")]
 async fn pkg(path: Path<String>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
@@ -225,10 +255,11 @@ async fn main() {
                 .service(root)
                 .service(validated)
                 .service(pkg)
-                .service(competitions)
-                .service(rounds)
-                .service(competitors)
-                .service(pdf)
+                .service(competition)
+   //             .service(competitions)
+     //           .service(rounds)
+       //         .service(competitors)
+         //       .service(pdf)
                 .app_data(Data::new(db_arc))
         });
 
