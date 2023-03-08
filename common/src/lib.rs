@@ -1,24 +1,17 @@
 use std::collections::HashMap;
 
-use serde::{Serialize, Deserialize};
-
-#[derive(Serialize, Deserialize)]
-pub struct CompetitionInfo {
-    pub name: String,
-    pub id: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct RoundInfo {
-    pub name: String,
-    pub previous_is_done: bool,
-}
+use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 #[derive(Serialize, Deserialize)]
 pub struct Competitors {
     pub competitors: Vec<u64>,
     pub names: HashMap<u64, String>,
     pub delegates: Vec<u64>,
+    pub stages: u64,
+    pub stations: u64,
+    pub event: String,
+    pub round: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -29,5 +22,16 @@ pub struct PdfRequest {
     pub wcif: bool,
     pub event: String,
     pub round: u64,
-    pub session: u64,
+}
+
+pub fn to_base_64<T>(data: T) -> String where T: Serialize {
+    let bytes = postcard::to_allocvec(&data).unwrap();
+    let engine = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new());
+    engine.encode(bytes) 
+}
+
+pub fn from_base_64<T>(base64: &str) -> T where T: DeserializeOwned { 
+    let engine = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new());
+    let bytes = engine.decode(base64).unwrap();
+    postcard::from_bytes(&bytes).unwrap()
 }
