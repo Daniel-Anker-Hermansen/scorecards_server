@@ -4,7 +4,7 @@ mod html;
 use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
-use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
+use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest, from_base_64};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -101,9 +101,9 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let id = path.into_inner();
     let wcif = session.oauth_mut().get_wcif(&id).await.unwrap();
     let rounds: Vec<_> = wcif.round_iter()
-        .map(|round| {
+        .map(|r| {
             RoundInfo {
-                name: round.id.clone(),
+                name: r.id.clone(),
                 previous_is_done: true,
             }
         })
@@ -111,6 +111,59 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     *session.wcif_mut() = Some(wcif); 
 
     "hi"
+}
+
+#[get("/{competition_id}/{event_id}/{round_no}")]
+async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, String, u64)>) -> impl Responder {
+    let (compettion_id, event_id, round_no) = path.into_inner(); 
+    "hi"
+}
+
+#[derive(Deserialize)]
+struct PdfRequest64 {
+    data: String,
+}
+
+#[get("pdf")]
+async fn pdf(http: HttpRequest, query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
+    let pdf_request: PdfRequest = from_base_64(&query.into_inner().data);
+    let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
+    let cookie = get_cookie(&http).unwrap();
+    let auth_code = cookie.value();
+    let mut lock = db.lock().await;
+    let session = lock
+        .session_mut(auth_code)
+        .unwrap();
+    let oauth = unsafe { std::ptr::read(session.oauth_mut() as *mut _) };
+    let mut wcif_oauth = session.wcif_mut()
+        .take()
+        .unwrap()
+        .add_oauth(oauth);
+    let pdf = wca_scorecards_lib::generate_pdf(
+        &pdf_request.event, 
+        pdf_request.round as usize, 
+        pdf_request.groups.into_iter()
+            .map(|z| z.into_iter().map(|z| z as usize).collect())
+            .collect(), 
+        pdf_request.wcif, 
+        &mut wcif_oauth, 
+        &stages, 
+        ScorecardOrdering::Default).await;
+    let (wcif, oauth) = wcif_oauth.disassemble();
+    std::mem::forget(oauth);
+    *session.wcif_mut() = Some(wcif);
+    match pdf {
+        Return::Pdf(z) => 
+            Response::build(StatusCode::OK)
+                .content_type("application/pdf")
+                .message_body(MessageBody::boxed(z))
+                .unwrap(),
+        Return::Zip(z) => 
+            Response::build(StatusCode::OK)
+                .content_type("application/zip")
+                .message_body(MessageBody::boxed(z))
+                .unwrap(),
+    }
 }
 
 /*#[get("{session}/competitions")]
