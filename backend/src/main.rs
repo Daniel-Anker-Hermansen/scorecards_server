@@ -64,6 +64,12 @@ struct CodeReceiver {
     code: Option<String>,
 }
 
+#[get("/css")]
+async fn css() -> impl Responder {
+    HttpResponse::build(StatusCode::OK)
+    .content_type("text/css").body(include_str!("../../frontend/html_src/style.css"))
+}
+
 #[get("/validated")]
 async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
     let cookie = get_cookie(&http);
@@ -302,6 +308,7 @@ async fn main() {
             let db_arc = db_arc.clone();
             App::new()
                 .service(root)
+                .service(css)
                 .service(validated)
                 .service(pkg)
                 .service(pdf)
