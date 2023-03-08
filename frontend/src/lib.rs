@@ -177,7 +177,7 @@ fn submit_on_click() {
             round: round_config.round,
         };
         let base64 = to_base_64(&pdf_request);
-        let url = format!("pdf?data={base64}");
+        let url = format!("/pdf?data={base64}");
 
         let element: HtmlElement = document().create_element("a").unwrap().unchecked_into();
         element.set_attribute("href", &url).unwrap();

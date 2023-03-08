@@ -304,12 +304,9 @@ async fn main() {
                 .service(root)
                 .service(validated)
                 .service(pkg)
+                .service(pdf)
                 .service(competition)
                 .service(round)
-   //             .service(competitions)
-     //           .service(rounds)
-       //         .service(competitors)
-         //       .service(pdf)
                 .app_data(Data::new(db_arc))
         });
 
