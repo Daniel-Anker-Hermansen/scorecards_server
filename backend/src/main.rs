@@ -1,10 +1,11 @@
 mod db;
 mod html;
 
-use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
+use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration,collections::{HashSet,HashMap}};
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use common::{Competitors,RoundInfo, PdfRequest, from_base_64};
+
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -12,6 +13,7 @@ use serde::Deserialize;
 use tokio::{sync::Mutex, join, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 use scorecard_to_pdf::Return;
+
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
@@ -104,15 +106,11 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
         .map(|r| {
                 let event_round_split: Vec<String> = r.id.split('-').map(String::from).collect();
                 RoundInfo{
-                    event :event_round_split[0].clone(),
-                    round_num :event_round_split[1][1..].parse::<u8>().unwrap()
+                    event: event_round_split[0].clone(),
+                    round_num: event_round_split[1][1..].parse::<u8>().unwrap()
                 } 
         })
         .collect();
-
-        
-
-    
 
     let body = html::rounds(rounds,&wcif.get().id);
     *session.wcif_mut() = Some(wcif); 
@@ -121,9 +119,37 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
 }
 
 #[get("/{competition_id}/{event_id}/{round_no}")]
-async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, String, u64)>) -> impl Responder {
-    let (compettion_id, event_id, round_no) = path.into_inner(); 
-    "hi"
+async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, String, usize)>) -> impl Responder {
+    let (competition_id, event_id, round_no) = path.into_inner();
+    let cookie = get_cookie(&http).unwrap();
+    let mut lock = db.lock().await;
+    let session = lock.session_mut(cookie.value()).unwrap();
+    let wcif = session.wcif_mut().as_mut().unwrap();
+    let delegates = wcif.reg_ids_of_delegates();
+    let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, &event_id, round_no);
+    // Couple of bad lines needed because of some stuff using usize and some using u64
+    let delegates_u64: Vec<u64> = delegates.iter().map(|x| *x as u64).collect();
+    let competitors_u64: Vec<u64> = competitors.iter().map(|x| *x as u64).collect();
+    let mut names_u64: HashMap<u64, String> = HashMap::new();
+    for (key, value) in names {
+        names_u64.insert(key as u64, value);
+    }
+
+    let comp_struct = Competitors{
+        competitors: competitors_u64,
+        names: names_u64,
+        delegates: delegates_u64,
+        stages: 1,
+        stations: 20,
+        event: event_id,
+        round: round_no as u64,
+    };
+
+    let body = html::group(comp_struct);
+    // *session.wcif_mut() = Some(wcif); 
+    let mut builder = HttpResponse::build(StatusCode::OK);
+    builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
+    // "hi"
 }
 
 #[derive(Deserialize)]
@@ -173,22 +199,7 @@ async fn pdf(http: HttpRequest, query: Query<PdfRequest64>, db: Data<Arc<Mutex<D
     }
 }
 
-/*#[get("{session}/competitions")]
-async fn competitions(db: Data<Arc<Mutex<DB>>>, path: Path<u64>) -> impl Responder {
-    let mut lock = db.lock().await;
-    let session = lock.session_mut(path.into_inner())
-        .unwrap();
-    let competitions = session.oauth_mut()
-        .get_competitions_managed_by_me()
-        .await;
-    let data: Vec<_> = competitions.into_iter()
-        .map(|c| {
-            CompetitionInfo { name: c.name().to_owned(), id: c.id().to_owned() }
-        })
-        .collect();
-    postcard::to_allocvec(&data).unwrap()
-}
-
+/*
 #[get("{session}/{competition}/rounds")]
 async fn rounds(db: Data<Arc<Mutex<DB>>>, path:Path<(u64, String)>) -> impl Responder {
     let mut lock = db.lock().await;
@@ -209,26 +220,6 @@ async fn rounds(db: Data<Arc<Mutex<DB>>>, path:Path<(u64, String)>) -> impl Resp
         .collect();
     *session.wcif_mut() = Some(wcif);
     postcard::to_allocvec(&rounds).unwrap()
-}
-
-#[get("{session}/{competition}/{round}/competitors")]
-async fn competitors(db: Data<Arc<Mutex<DB>>>, path: Path<(u64, String, String)>) -> impl Responder {
-    let mut lock = db.lock().await;
-    let (session, _, round) = &path.into_inner();
-    let session = lock.session_mut(*session)
-        .unwrap();
-    let wcif = session.wcif_mut().as_mut().unwrap();
-    let mut iter = round.split('-');
-    let event = iter.next().unwrap();
-    let round = iter.next().unwrap()[1..].parse().unwrap();
-    let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, event, round);
-    let delegates = wcif.reg_ids_of_delegates();
-    let result = Competitors {
-        competitors: competitors.into_iter().map(|z| z as u64).collect(),
-        names: names.into_iter().map(|(z, s)| (z as u64, s)).collect(),
-        delegates: delegates.into_iter().map(|z| z as u64).collect(),
-    };
-    postcard::to_allocvec(&result).unwrap()
 }
 
 #[derive(Deserialize)]
@@ -316,6 +307,7 @@ async fn main() {
                 .service(validated)
                 .service(pkg)
                 .service(competition)
+                .service(round)
    //             .service(competitions)
      //           .service(rounds)
        //         .service(competitors)
