@@ -5,7 +5,6 @@ use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration,c
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use common::{Competitors,RoundInfo, PdfRequest, from_base_64};
-
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -111,7 +110,6 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
                 } 
         })
         .collect();
-
     let body = html::rounds(rounds,&wcif.get().id);
     *session.wcif_mut() = Some(wcif); 
     let mut builder = HttpResponse::build(StatusCode::OK);
