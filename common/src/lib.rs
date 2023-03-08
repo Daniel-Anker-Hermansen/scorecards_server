@@ -15,6 +15,18 @@ pub struct Competitors {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct RoundInfo {
+    pub event: String,
+    pub round_num: u8, 
+}
+
+impl RoundInfo {
+    pub fn print_name(&self) -> String {
+        format!("{}, Round {}", self.event, self.round_num)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct PdfRequest {
     pub stages: u64,
     pub stations: u64,
