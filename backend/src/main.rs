@@ -4,7 +4,7 @@ mod html;
 use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
-use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest, from_base_64};
+use common::{Competitors,RoundInfo, PdfRequest, from_base_64};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -102,15 +102,22 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let wcif = session.oauth_mut().get_wcif(&id).await.unwrap();
     let rounds: Vec<_> = wcif.round_iter()
         .map(|r| {
-            RoundInfo {
-                name: r.id.clone(),
-                previous_is_done: true,
-            }
+                let event_round_split: Vec<String> = r.id.split('-').map(String::from).collect();
+                RoundInfo{
+                    event :event_round_split[0].clone(),
+                    round_num :event_round_split[1][1..].parse::<u8>().unwrap()
+                } 
         })
         .collect();
-    *session.wcif_mut() = Some(wcif); 
 
-    "hi"
+        
+
+    
+
+    let body = html::rounds(rounds,&wcif.get().id);
+    *session.wcif_mut() = Some(wcif); 
+    let mut builder = HttpResponse::build(StatusCode::OK);
+    builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
 }
 
 #[get("/{competition_id}/{event_id}/{round_no}")]
