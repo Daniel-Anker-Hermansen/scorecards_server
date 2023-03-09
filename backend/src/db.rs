@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, hash_map::Entry}, time::{Instant, Duration}};
+use std::{collections::HashMap, time::{Instant, Duration}};
 
 use wca_oauth::{OAuth, WcifContainer};
 
