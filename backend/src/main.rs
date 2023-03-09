@@ -1,9 +1,9 @@
 mod db;
+mod html;
 
 use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
-use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response};
-use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
-use common::{CompetitionInfo, RoundInfo, Competitors, PdfRequest};
+use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
+use common::{Competitors,RoundInfo, PdfRequest, from_base_64};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -11,6 +11,7 @@ use serde::Deserialize;
 use tokio::{sync::Mutex, join, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 use scorecard_to_pdf::Return;
+
 
 #[derive(Deserialize, Debug, Clone)]
 struct Config {
@@ -23,89 +24,138 @@ struct Config {
     pkg_path: String,
 }
 
+fn get_cookie(http: &HttpRequest) -> Option<Cookie<'static>> {
+    http.cookies()
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .find(|c| c.name() == "scorecards")
+}
+
+fn create_cookie(code: &str) -> Cookie {
+    Cookie::build("scorecards", code)
+        .secure(true)
+        .http_only(true)
+        .max_age(time::Duration::hours(1))
+        .finish()
+}
+
 #[get("/")]
-async fn root(db: Data<Arc<Mutex<DB>>>) -> impl Responder {
+async fn root(http: HttpRequest, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
     let lock = db.lock().await;
-    let config = lock.config();
-    let body = format!("<script>window.location.href=\"{}\"</script>", &config.auth_url);
+    let body = match get_cookie(&http) {
+        Some(v) if lock.session_exists(v.value()) => {
+            format!("<script>window.location.href=\"validated\"</script>")
+        }
+        _ => {
+            let config = lock.config();
+            format!("<script>window.location.href=\"{}\"</script>", &config.auth_url)
+        }
+    };
     Response::build(StatusCode::OK)
         .content_type("html")
         .message_body(MessageBody::boxed(body))
         .unwrap()
+}
+
+#[get("/css")]
+async fn css() -> impl Responder {
+    HttpResponse::build(StatusCode::OK)
+    .content_type("text/css").body(include_str!("../../frontend/html_src/style.css"))
 }
 
 #[derive(Deserialize)]
 struct CodeReceiver {
-    code: String,
+    code: Option<String>,
 }
 
 #[get("/validated")]
-async fn validated(db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
+async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
+    let cookie = get_cookie(&http);
     let mut lock = db.lock().await;
-    let session = lock.insert_session(query.code.clone()).await;
-    let body = include_str!("../index.html").replace("SESSION", &session.to_string());
-    Response::build(StatusCode::OK)
+    let (mut builder, auth_code) = match cookie {
+        Some(v) if lock.session_exists(v.value())  => (HttpResponse::build(StatusCode::OK), v.value().to_owned()),
+        _ => {
+            lock.insert_session(query.code.clone().unwrap()).await;
+            let cookie = create_cookie(query.code.as_ref().unwrap());
+            let mut builder = HttpResponse::build(StatusCode::OK);
+            builder.cookie(cookie);
+            (builder, query.code.as_ref().unwrap().clone())
+        },
+    };
+
+    let my_competitions = lock.session_mut(&auth_code)
+        .expect("Cookie is not expired")
+        .oauth_mut()
+        .get_competitions_managed_by_me()
+        .await; 
+
+    let body = html::validated(my_competitions);
+
+    builder
         .content_type("html")
         .message_body(MessageBody::boxed(body))
         .unwrap()
 }
 
-#[get("{session}/competitions")]
-async fn competitions(db: Data<Arc<Mutex<DB>>>, path: Path<u64>) -> impl Responder {
+#[get("/{competition_id}")]
+async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<String>) -> impl Responder {
+    let cookie = get_cookie(&http).unwrap();
     let mut lock = db.lock().await;
-    let session = lock.session_mut(path.into_inner())
-        .unwrap();
-    let competitions = session.oauth_mut()
-        .get_competitions_managed_by_me()
-        .await;
-    let data: Vec<_> = competitions.into_iter()
-        .map(|c| {
-            CompetitionInfo { name: c.name().to_owned(), id: c.id().to_owned() }
+    let session = lock.session_mut(cookie.value()).unwrap();
+    let id = path.into_inner();
+    let wcif = session.wcif_mut(&id).await;
+    let rounds = wcif.round_iter()
+        .map(|r| {
+                let mut event_round_split = r.id.split('-');
+                RoundInfo{
+                    event: event_round_split.next().unwrap().to_owned(),
+                    round_num: event_round_split.next().unwrap()[1..].parse().unwrap(),
+                } 
         })
         .collect();
-    postcard::to_allocvec(&data).unwrap()
+    let body = html::rounds(rounds,&wcif.get().id);
+    let mut builder = HttpResponse::build(StatusCode::OK);
+    builder.content_type("html")
+        .message_body(MessageBody::boxed(body)).unwrap()
 }
 
-#[get("{session}/{competition}/rounds")]
-async fn rounds(db: Data<Arc<Mutex<DB>>>, path:Path<(u64, String)>) -> impl Responder {
-    let mut lock = db.lock().await;
-    let path_inner = &path.into_inner();
-    let session = lock.session_mut(path_inner.0)
-        .unwrap();
-    let wcif = session.oauth_mut()
-        .get_wcif(&path_inner.1)
-        .await
-        .unwrap();
-    let rounds: Vec<_> = wcif.round_iter()
-        .map(|round| {
-            RoundInfo {
-                name: round.id.clone(),
-                previous_is_done: true,
-            }
-        })
-        .collect();
-    *session.wcif_mut() = Some(wcif);
-    postcard::to_allocvec(&rounds).unwrap()
+#[derive(Deserialize)]
+struct StagesQuery {
+    stages: u64,
+    stations: u64,
 }
 
-#[get("{session}/{competition}/{round}/competitors")]
-async fn competitors(db: Data<Arc<Mutex<DB>>>, path: Path<(u64, String, String)>) -> impl Responder {
+#[get("/{competition_id}/{event_id}/{round_no}")]
+async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, String, usize)>, query: Query<StagesQuery>) -> impl Responder {
+    let (competition_id, event_id, round_no) = path.into_inner();
+    let cookie = get_cookie(&http).unwrap();
     let mut lock = db.lock().await;
-    let (session, _, round) = &path.into_inner();
-    let session = lock.session_mut(*session)
-        .unwrap();
-    let wcif = session.wcif_mut().as_mut().unwrap();
-    let mut iter = round.split('-');
-    let event = iter.next().unwrap();
-    let round = iter.next().unwrap()[1..].parse().unwrap();
-    let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, event, round);
+    let session = lock.session_mut(cookie.value()).unwrap();
+    let wcif = session.wcif_mut(&competition_id).await;
     let delegates = wcif.reg_ids_of_delegates();
-    let result = Competitors {
-        competitors: competitors.into_iter().map(|z| z as u64).collect(),
-        names: names.into_iter().map(|(z, s)| (z as u64, s)).collect(),
-        delegates: delegates.into_iter().map(|z| z as u64).collect(),
+    let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, &event_id, round_no);
+    // Couple of bad lines needed because of some stuff using usize and some using u64
+    let delegates_u64 = delegates.into_iter().map(|x| x as u64).collect();
+    let competitors_u64 = competitors.into_iter().map(|x| x as u64).collect();
+    let names_u64 = names.into_iter().map(|(k, v)| (k as u64, v)).collect();
+
+    let stages = query.into_inner();
+
+    let comp_struct = Competitors {
+        competition: competition_id,
+        competitors: competitors_u64,
+        names: names_u64,
+        delegates: delegates_u64,
+        stages: stages.stages,
+        stations: stages.stations,
+        event: event_id,
+        round: round_no as u64,
     };
-    postcard::to_allocvec(&result).unwrap()
+
+    let body = html::group(comp_struct);
+    let mut builder = HttpResponse::build(StatusCode::OK);
+    builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
 }
 
 #[derive(Deserialize)]
@@ -113,19 +163,19 @@ struct PdfRequest64 {
     data: String,
 }
 
-#[get("/submit")]
-async fn pdf(query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
-    let body = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new()).decode(&query.data).unwrap();
-    let pdf_request: PdfRequest = postcard::from_bytes(&body).unwrap();
+#[get("pdf")]
+async fn pdf(http: HttpRequest, query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
+    let pdf_request: PdfRequest = from_base_64(&query.into_inner().data);
     let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
+    let cookie = get_cookie(&http).unwrap();
+    let auth_code = cookie.value();
     let mut lock = db.lock().await;
     let session = lock
-        .session_mut(pdf_request.session)
+        .session_mut(auth_code)
         .unwrap();
     let oauth = unsafe { std::ptr::read(session.oauth_mut() as *mut _) };
-    let mut wcif_oauth = session.wcif_mut()
-        .take()
-        .unwrap()
+    let mut wcif_oauth = session.remove_wcif(&pdf_request.competition)
+        .await
         .add_oauth(oauth);
     let pdf = wca_scorecards_lib::generate_pdf(
         &pdf_request.event, 
@@ -139,7 +189,7 @@ async fn pdf(query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Respo
         ScorecardOrdering::Default).await;
     let (wcif, oauth) = wcif_oauth.disassemble();
     std::mem::forget(oauth);
-    *session.wcif_mut() = Some(wcif);
+    session.insert_wcif(&pdf_request.competition, wcif);
     match pdf {
         Return::Pdf(z) => 
             Response::build(StatusCode::OK)
@@ -159,7 +209,6 @@ async fn pkg(path: Path<String>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
     let lock = db.lock().await;
     let pkg_path = &lock.config().pkg_path;
     let file_path = format!("{pkg_path}/{path}");
-    dbg!(&file_path);
     let data = std::fs::read(file_path).unwrap();
     let mime = if path.ends_with(".js") {
         "text/javascript"
@@ -190,12 +239,12 @@ async fn main() {
             let db_arc = db_arc.clone();
             App::new()
                 .service(root)
+                .service(css)
                 .service(validated)
                 .service(pkg)
-                .service(competitions)
-                .service(rounds)
-                .service(competitors)
                 .service(pdf)
+                .service(competition)
+                .service(round)
                 .app_data(Data::new(db_arc))
         });
 

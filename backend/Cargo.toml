@@ -13,9 +13,6 @@ wca_scorecards_lib = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tool
 scorecard_to_pdf = { git = "https://github.com/Daniel-Anker-Hermansen/WCA_tools_lib" }
 tokio = { version = "1.25.0", features = ["full"] }
 actix-web = { version = "4.3.0", features = ["rustls"] }
-postcard = { version = "1.0.2", features = ["alloc"], default-features = false}
 common = { path = "../common" }
-rand = "0.7"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
-base64 = "0.21.0"

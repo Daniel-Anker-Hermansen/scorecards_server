@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Scorecards</title>
+    <link rel="stylesheet" type="text/css" href="/css">
+    <script>
+        function redirect(base) {
+            let stages = document.getElementById("stages").value;
+            let stations = document.getElementById("stations").value;
+            window.location.href = base + "?stages=" + stages + "&stations=" + stations; 
+        }
+    </script>
+</head>
+    <body>
+        <div>
+            <text>Number of stages: </text>
+            <input value = "1" id = "stages"></input>
+        </div>
+        <div>
+            <text>Number of stations per stage: </text>
+            <input value = "10", id = "stations"></input>
+        </div>
+        ROUNDS
+    </body>
+</html>

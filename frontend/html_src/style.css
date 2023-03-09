@@ -1,0 +1,14 @@
+.style_list {
+    border: 1px solid black;
+    background-color: #dedede;
+    padding: 5px;
+    margin: 5px;
+    display: flex; 
+    cursor: pointer; 
+    text-decoration: none; 
+    color: black;
+}
+.style_list:hover {
+    background-color: lightgray;
+    border-color: gray;
+}
