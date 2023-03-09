@@ -66,11 +66,8 @@ checksum = "6548a0ad5d2549e111e1f6a11a6c2e2d00ce6a3dafe22948d67c2b443f775e52"
 name = "frontend"
 version = "0.1.0"
 dependencies = [
- "base64",
  "common",
  "js-sys",
- "postcard",
- "serde",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
