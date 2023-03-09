@@ -43,12 +43,12 @@ fn create_cookie(code: &str) -> Cookie {
 
 #[get("/")]
 async fn root(http: HttpRequest, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
+    let lock = db.lock().await;
     let body = match get_cookie(&http) {
-        Some(_) => {
+        Some(v) if lock.session_exists(v.value()) => {
             format!("<script>window.location.href=\"validated\"</script>")
         }
-        None => {
-            let lock = db.lock().await;
+        _ => {
             let config = lock.config();
             format!("<script>window.location.href=\"{}\"</script>", &config.auth_url)
         }
@@ -73,10 +73,10 @@ async fn css() -> impl Responder {
 #[get("/validated")]
 async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<CodeReceiver>) -> impl Responder {
     let cookie = get_cookie(&http);
+    let mut lock = db.lock().await;
     let (mut builder, auth_code) = match cookie {
-        Some(v) => (HttpResponse::build(StatusCode::OK), v.value().to_owned()),
-        None => {
-            let mut lock = db.lock().await;
+        Some(v) if lock.session_exists(v.value())  => (HttpResponse::build(StatusCode::OK), v.value().to_owned()),
+        _ => {
             lock.insert_session(query.code.clone().unwrap()).await;
             let cookie = create_cookie(query.code.as_ref().unwrap());
             let mut builder = HttpResponse::build(StatusCode::OK);
@@ -85,7 +85,6 @@ async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<Cod
         },
     };
 
-    let mut lock = db.lock().await;
     let my_competitions = lock.session_mut(&auth_code)
         .expect("Cookie is not expired")
         .oauth_mut()
@@ -106,7 +105,7 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let mut lock = db.lock().await;
     let session = lock.session_mut(cookie.value()).unwrap();
     let id = path.into_inner();
-    let wcif = session.oauth_mut().get_wcif(&id).await.unwrap();
+    let wcif = session.wcif_mut(&id).await;
     let rounds: Vec<_> = wcif.round_iter()
         .map(|r| {
                 let event_round_split: Vec<String> = r.id.split('-').map(String::from).collect();
@@ -117,7 +116,6 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
         })
         .collect();
     let body = html::rounds(rounds,&wcif.get().id);
-    *session.wcif_mut() = Some(wcif); 
     let mut builder = HttpResponse::build(StatusCode::OK);
     builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
 }
@@ -134,7 +132,7 @@ async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, 
     let cookie = get_cookie(&http).unwrap();
     let mut lock = db.lock().await;
     let session = lock.session_mut(cookie.value()).unwrap();
-    let wcif = session.wcif_mut().as_mut().unwrap();
+    let wcif = session.wcif_mut(&competition_id).await;
     let delegates = wcif.reg_ids_of_delegates();
     let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, &event_id, round_no);
     // Couple of bad lines needed because of some stuff using usize and some using u64
@@ -144,7 +142,8 @@ async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, 
 
     let stages = query.into_inner();
 
-    let comp_struct = Competitors{
+    let comp_struct = Competitors {
+        competition: competition_id,
         competitors: competitors_u64,
         names: names_u64,
         delegates: delegates_u64,
@@ -155,10 +154,8 @@ async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, 
     };
 
     let body = html::group(comp_struct);
-    // *session.wcif_mut() = Some(wcif); 
     let mut builder = HttpResponse::build(StatusCode::OK);
     builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
-    // "hi"
 }
 
 #[derive(Deserialize)]
@@ -177,9 +174,8 @@ async fn pdf(http: HttpRequest, query: Query<PdfRequest64>, db: Data<Arc<Mutex<D
         .session_mut(auth_code)
         .unwrap();
     let oauth = unsafe { std::ptr::read(session.oauth_mut() as *mut _) };
-    let mut wcif_oauth = session.wcif_mut()
-        .take()
-        .unwrap()
+    let mut wcif_oauth = session.remove_wcif(&pdf_request.competition)
+        .await
         .add_oauth(oauth);
     let pdf = wca_scorecards_lib::generate_pdf(
         &pdf_request.event, 
@@ -193,7 +189,7 @@ async fn pdf(http: HttpRequest, query: Query<PdfRequest64>, db: Data<Arc<Mutex<D
         ScorecardOrdering::Default).await;
     let (wcif, oauth) = wcif_oauth.disassemble();
     std::mem::forget(oauth);
-    *session.wcif_mut() = Some(wcif);
+    session.insert_wcif(&pdf_request.competition, wcif);
     match pdf {
         Return::Pdf(z) => 
             Response::build(StatusCode::OK)

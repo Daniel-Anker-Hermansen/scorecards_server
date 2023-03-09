@@ -5,6 +5,7 @@ use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 #[derive(Serialize, Deserialize)]
 pub struct Competitors {
+    pub competition: String,
     pub competitors: Vec<u64>,
     pub names: HashMap<u64, String>,
     pub delegates: Vec<u64>,
@@ -28,6 +29,7 @@ impl RoundInfo {
 
 #[derive(Serialize, Deserialize)]
 pub struct PdfRequest {
+    pub competition: String,
     pub stages: u64,
     pub stations: u64,
     pub groups: Vec<Vec<u64>>,

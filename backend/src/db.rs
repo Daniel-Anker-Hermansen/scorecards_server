@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::{Instant, Duration}};
+use std::{collections::{HashMap, hash_map::Entry}, time::{Instant, Duration}};
 
 use wca_oauth::{OAuth, WcifContainer};
 
@@ -16,6 +16,10 @@ impl DB {
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub fn session_exists(&self, session: &str) -> bool {
+        self.sessions.contains_key(session)
     }
 
     pub fn session_mut(&mut self, session: &str) -> Option<&mut Session> {
@@ -40,21 +44,38 @@ impl DB {
 
 pub(crate) struct Session {
     oauth: OAuth,
-    wcif: Option<WcifContainer>,
+    wcif: HashMap<String, WcifContainer>,
     created: Instant,
 }
 
 impl Session {
     fn new(oauth: OAuth) -> Session {
-        Session { oauth, wcif: None, created: Instant::now() }   
+        Session { oauth, wcif: HashMap::new(), created: Instant::now() }   
     }
 
     pub fn oauth_mut(&mut self) -> &mut OAuth {
         &mut self.oauth
     }
 
-    pub fn wcif_mut(&mut self) -> &mut Option<WcifContainer> {
-        &mut self.wcif
+    pub async fn wcif_mut(&mut self, competition: &str) -> &mut WcifContainer {
+        if !self.wcif.contains_key(competition) {
+            self.wcif.insert(competition.to_owned(), self.oauth.get_wcif(competition).await.unwrap());
+        }
+        // key competition is always occupied due to if above.
+        self.wcif.get_mut(competition).unwrap()
+    }
+
+    pub async fn remove_wcif(&mut self, competition: &str) -> WcifContainer {
+       if self.wcif.contains_key(competition) {
+            self.wcif.remove(competition).unwrap()
+       }
+       else {
+            self.oauth.get_wcif(competition).await.unwrap()
+       }
+    }
+
+    pub fn insert_wcif(&mut self, competition: &str, wcif: WcifContainer) {
+        self.wcif.insert(competition.to_string(), wcif);
     }
 
     fn expired(&self) -> bool {

@@ -16,6 +16,7 @@ pub fn start(base_64: &str) {
         competitor_info.stages,
         competitor_info.stations);
     let round_config = RoundConfig {
+        competition: competitor_info.competition,
         stages: competitor_info.stages,
         stations: competitor_info.stations,
         groups,
@@ -59,6 +60,7 @@ fn distribution(mut remaining: u64, no_of_groups: u64) -> Vec<u64> {
 
 #[derive(Clone)]
 struct RoundConfig {
+    competition: String,
     stages: u64,
     stations: u64,
     groups: Vec<Vec<u64>>,
@@ -169,6 +171,7 @@ fn submit_on_click() {
         let rc = get_round_config();
         let round_config = rc.lock().unwrap();
         let pdf_request = PdfRequest {
+            competition: round_config.competition.clone(),
             stages: round_config.stages,
             stations: round_config.stations,
             groups: round_config.submit().unwrap().clone(),
