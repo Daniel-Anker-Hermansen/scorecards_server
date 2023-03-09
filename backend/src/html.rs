@@ -3,7 +3,6 @@ use wca_oauth::Competition;
 
 const VALIDATED: &str = include_str!("../../frontend/html_src/validated.html");
 const ROUNDS: &str = include_str!("../../frontend/html_src/competition_rounds.html");
-
 const GROUP: &str = include_str!("../../frontend/html_src/group.html");
 
 pub fn validated(competitions: Vec<Competition>) -> String {

@@ -1,9 +1,8 @@
 mod db;
 mod html;
 
-use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration,collections::{HashSet,HashMap}};
-use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::{StatusCode, header::Header}, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
-use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
+use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
+use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
 use common::{Competitors,RoundInfo, PdfRequest, from_base_64};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
@@ -59,15 +58,15 @@ async fn root(http: HttpRequest, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
         .unwrap()
 }
 
-#[derive(Deserialize)]
-struct CodeReceiver {
-    code: Option<String>,
-}
-
 #[get("/css")]
 async fn css() -> impl Responder {
     HttpResponse::build(StatusCode::OK)
     .content_type("text/css").body(include_str!("../../frontend/html_src/style.css"))
+}
+
+#[derive(Deserialize)]
+struct CodeReceiver {
+    code: Option<String>,
 }
 
 #[get("/validated")]
@@ -106,18 +105,19 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let session = lock.session_mut(cookie.value()).unwrap();
     let id = path.into_inner();
     let wcif = session.wcif_mut(&id).await;
-    let rounds: Vec<_> = wcif.round_iter()
+    let rounds = wcif.round_iter()
         .map(|r| {
-                let event_round_split: Vec<String> = r.id.split('-').map(String::from).collect();
+                let mut event_round_split = r.id.split('-');
                 RoundInfo{
-                    event: event_round_split[0].clone(),
-                    round_num: event_round_split[1][1..].parse::<u8>().unwrap()
+                    event: event_round_split.next().unwrap().to_owned(),
+                    round_num: event_round_split.next().unwrap()[1..].parse().unwrap(),
                 } 
         })
         .collect();
     let body = html::rounds(rounds,&wcif.get().id);
     let mut builder = HttpResponse::build(StatusCode::OK);
-    builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
+    builder.content_type("html")
+        .message_body(MessageBody::boxed(body)).unwrap()
 }
 
 #[derive(Deserialize)]
@@ -204,81 +204,11 @@ async fn pdf(http: HttpRequest, query: Query<PdfRequest64>, db: Data<Arc<Mutex<D
     }
 }
 
-/*
-#[get("{session}/{competition}/rounds")]
-async fn rounds(db: Data<Arc<Mutex<DB>>>, path:Path<(u64, String)>) -> impl Responder {
-    let mut lock = db.lock().await;
-    let path_inner = &path.into_inner();
-    let session = lock.session_mut(path_inner.0)
-        .unwrap();
-    let wcif = session.oauth_mut()
-        .get_wcif(&path_inner.1)
-        .await
-        .unwrap();
-    let rounds: Vec<_> = wcif.round_iter()
-        .map(|round| {
-            RoundInfo {
-                name: round.id.clone(),
-                previous_is_done: true,
-            }
-        })
-        .collect();
-    *session.wcif_mut() = Some(wcif);
-    postcard::to_allocvec(&rounds).unwrap()
-}
-
-#[derive(Deserialize)]
-struct PdfRequest64 {
-    data: String,
-}
-
-#[get("/submit")]
-async fn pdf(query: Query<PdfRequest64>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
-    let body = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new()).decode(&query.data).unwrap();
-    let pdf_request: PdfRequest = postcard::from_bytes(&body).unwrap();
-    let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
-    let mut lock = db.lock().await;
-    let session = lock
-        .session_mut(pdf_request.session)
-        .unwrap();
-    let oauth = unsafe { std::ptr::read(session.oauth_mut() as *mut _) };
-    let mut wcif_oauth = session.wcif_mut()
-        .take()
-        .unwrap()
-        .add_oauth(oauth);
-    let pdf = wca_scorecards_lib::generate_pdf(
-        &pdf_request.event, 
-        pdf_request.round as usize, 
-        pdf_request.groups.into_iter()
-            .map(|z| z.into_iter().map(|z| z as usize).collect())
-            .collect(), 
-        pdf_request.wcif, 
-        &mut wcif_oauth, 
-        &stages, 
-        ScorecardOrdering::Default).await;
-    let (wcif, oauth) = wcif_oauth.disassemble();
-    std::mem::forget(oauth);
-    *session.wcif_mut() = Some(wcif);
-    match pdf {
-        Return::Pdf(z) => 
-            Response::build(StatusCode::OK)
-                .content_type("application/pdf")
-                .message_body(MessageBody::boxed(z))
-                .unwrap(),
-        Return::Zip(z) => 
-            Response::build(StatusCode::OK)
-                .content_type("application/zip")
-                .message_body(MessageBody::boxed(z))
-                .unwrap(),
-    }
-}*/
-
 #[get("/pkg/{file:.*}")]
 async fn pkg(path: Path<String>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
     let lock = db.lock().await;
     let pkg_path = &lock.config().pkg_path;
     let file_path = format!("{pkg_path}/{path}");
-    dbg!(&file_path);
     let data = std::fs::read(file_path).unwrap();
     let mime = if path.ends_with(".js") {
         "text/javascript"
