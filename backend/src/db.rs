@@ -57,6 +57,10 @@ impl Session {
         &mut self.oauth
     }
 
+    pub async fn wcif_force_download(&mut self, competition: &str) {
+            self.wcif.insert(competition.to_owned(), self.oauth.get_wcif(competition).await.unwrap());
+    }
+
     pub async fn wcif_mut(&mut self, competition: &str) -> &mut WcifContainer {
         if !self.wcif.contains_key(competition) {
             self.wcif.insert(competition.to_owned(), self.oauth.get_wcif(competition).await.unwrap());

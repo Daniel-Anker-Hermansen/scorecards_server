@@ -104,6 +104,7 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let mut lock = db.lock().await;
     let session = lock.session_mut(cookie.value()).unwrap();
     let id = path.into_inner();
+    session.wcif_force_download(&id).await;
     let wcif = session.wcif_mut(&id).await;
     let rounds = wcif.round_iter()
         .map(|r| {
