@@ -18,7 +18,7 @@ pub fn validated(competitions: Vec<Competition>) -> String {
 
 pub fn rounds(rounds: Vec<RoundInfo>,competition_id:&str) -> String {
     let inner = rounds.into_iter()
-        .map(|round| format!("<a class =  \"style_list\" href = \"/{competition_id}/{event}/{round}\"><text>{name}</text></a>",
+        .map(|round| format!("<a class =  \"style_list\" onclick = redirect(\"/{competition_id}/{event}/{round}\")><text>{name}</text></a>",
             event = round.event,
             round = round.round_num,
             name = round.print_name()))

@@ -122,8 +122,14 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     builder.content_type("html").message_body(MessageBody::boxed(body)).unwrap()
 }
 
+#[derive(Deserialize)]
+struct StagesQuery {
+    stages: u64,
+    stations: u64,
+}
+
 #[get("/{competition_id}/{event_id}/{round_no}")]
-async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, String, usize)>) -> impl Responder {
+async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, String, usize)>, query: Query<StagesQuery>) -> impl Responder {
     let (competition_id, event_id, round_no) = path.into_inner();
     let cookie = get_cookie(&http).unwrap();
     let mut lock = db.lock().await;
@@ -132,19 +138,18 @@ async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, 
     let delegates = wcif.reg_ids_of_delegates();
     let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, &event_id, round_no);
     // Couple of bad lines needed because of some stuff using usize and some using u64
-    let delegates_u64: Vec<u64> = delegates.iter().map(|x| *x as u64).collect();
-    let competitors_u64: Vec<u64> = competitors.iter().map(|x| *x as u64).collect();
-    let mut names_u64: HashMap<u64, String> = HashMap::new();
-    for (key, value) in names {
-        names_u64.insert(key as u64, value);
-    }
+    let delegates_u64 = delegates.into_iter().map(|x| x as u64).collect();
+    let competitors_u64 = competitors.into_iter().map(|x| x as u64).collect();
+    let names_u64 = names.into_iter().map(|(k, v)| (k as u64, v)).collect();
+
+    let stages = query.into_inner();
 
     let comp_struct = Competitors{
         competitors: competitors_u64,
         names: names_u64,
         delegates: delegates_u64,
-        stages: 1,
-        stations: 20,
+        stages: stages.stages,
+        stations: stages.stations,
         event: event_id,
         round: round_no as u64,
     };
