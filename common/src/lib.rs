@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+// use wca_oauth::wcif::Result;
 
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
@@ -19,11 +20,16 @@ pub struct Competitors {
 pub struct RoundInfo {
     pub event: String,
     pub round_num: u8, 
+    pub groups_exist: Option<bool>,
 }
 
 impl RoundInfo {
     pub fn print_name(&self) -> String {
         format!("{}, Round {}", self.event, self.round_num)
+    }
+
+    pub fn set_groups_exist(&mut self, val: bool) {
+        self.groups_exist = Some(val);
     }
 }
 

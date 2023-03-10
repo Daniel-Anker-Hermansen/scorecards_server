@@ -12,3 +12,11 @@
     background-color: lightgray;
     border-color: gray;
 }
+
+.groups_exist::after {
+    content: "\2611"; /* Unicode character for empty checkbox */
+    display: inline-block;
+    float: right;
+    margin-left: 10px;
+    color: green;
+  }
