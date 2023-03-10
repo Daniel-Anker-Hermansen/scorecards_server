@@ -106,12 +106,11 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let id = path.into_inner();
     session.wcif_force_download(&id).await;
     let wcif = session.wcif_mut(&id).await;
-
     let mut rounds: Vec<RoundInfo>= wcif.round_iter()
         .map(|r| {
                 let mut event_round_split = r.id.split('-');
                 RoundInfo{
-                    event:  event_round_split.next().unwrap().to_owned(),
+                    event: event_round_split.next().unwrap().to_owned(),
                     round_num: event_round_split.next().unwrap()[1..].parse().unwrap(),
                     groups_exist: None,
                 } 

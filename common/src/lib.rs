@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-// use wca_oauth::wcif::Result;
 
 use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
 use serde::{Serialize, Deserialize, de::DeserializeOwned};

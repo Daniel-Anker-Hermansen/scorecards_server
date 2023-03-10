@@ -447,7 +447,6 @@ dependencies = [
  "base64 0.21.0",
  "postcard",
  "serde",
- "wca_oauth",
 ]
 
 [[package]]
