@@ -19,7 +19,7 @@ pub fn rounds(rounds: Vec<RoundInfo>,competition_id:&str) -> String {
     let inner = rounds.into_iter()
         .map(|round| 
             {
-                let class_style = if round.groups_exist.unwrap() {
+                let class_style = if round.groups_exist {
                     "style_list groups_exist"
                 } else {
                     "style_list"
