@@ -17,10 +17,17 @@ pub fn validated(competitions: Vec<Competition>) -> String {
 
 pub fn rounds(rounds: Vec<RoundInfo>,competition_id:&str) -> String {
     let inner = rounds.into_iter()
-        .map(|round| format!("<a class =  \"style_list\" onclick = redirect(\"/{competition_id}/{event}/{round}\")><text>{name}</text></a>",
+        .map(|round| 
+            {
+                let class_style = if round.groups_exist {
+                    "style_list groups_exist"
+                } else {
+                    "style_list"
+                };
+                format!("<a class =  \"{class_style}\" onclick = redirect(\"/{competition_id}/{event}/{round}\")><text>{name}</text></a>",
             event = round.event,
             round = round.round_num,
-            name = round.print_name()))
+            name = round.print_name())})
         .collect::<Vec<_>>()
         .join("\n");
     ROUNDS.replace("ROUNDS", &inner)

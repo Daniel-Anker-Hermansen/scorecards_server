@@ -106,15 +106,19 @@ async fn competition(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<Str
     let id = path.into_inner();
     session.wcif_force_download(&id).await;
     let wcif = session.wcif_mut(&id).await;
-    let rounds = wcif.round_iter()
+    let rounds: Vec<RoundInfo>= wcif.round_iter()
         .map(|r| {
                 let mut event_round_split = r.id.split('-');
+                let event = event_round_split.next().unwrap();
+                let round_num = event_round_split.next().unwrap()[1..].parse().unwrap();
                 RoundInfo{
-                    event: event_round_split.next().unwrap().to_owned(),
-                    round_num: event_round_split.next().unwrap()[1..].parse().unwrap(),
+                    event: event.to_owned(),
+                    round_num: round_num,
+                    groups_exist: wcif.detect_round_groups_exist(event,round_num as usize),
                 } 
         })
         .collect();
+    
     let body = html::rounds(rounds,&wcif.get().id);
     let mut builder = HttpResponse::build(StatusCode::OK);
     builder.content_type("html")

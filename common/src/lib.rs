@@ -19,11 +19,37 @@ pub struct Competitors {
 pub struct RoundInfo {
     pub event: String,
     pub round_num: u8, 
+    // pub groups_exist: Option<bool>,
+    pub groups_exist: bool,
 }
 
 impl RoundInfo {
+    pub fn human_readable_event_name(&self) -> String {
+        let readable = match self.event.as_str() {
+            "333" => "3x3",
+            "222" => "2x2",
+            "444" => "4x4",
+            "555" => "5x5",
+            "666" => "6x6",
+            "777" => "7x7",
+            "333oh" => "3x3 One-Handed",
+            "333bf" => "3x3 Blindfolded",
+            "333fm" => "Fewest Moves (ignore)",
+            "clock" => "Clock",
+            "pyram" => "Pyraminx",
+            "minx" => "Megaminx",
+            "skewb" => "Skewb",
+            "sq1" => "Square-1",
+            "444bf" => "4x4 Blindfolded",
+            "555bf" => "5x5 Blindfolded",
+            "333mbf" => "3x3 Multi-Blind",
+            _ => "You provided an invalid event name",
+        };
+        readable.to_string()
+    }
+
     pub fn print_name(&self) -> String {
-        format!("{}, Round {}", self.event, self.round_num)
+        format!("{}, Round {}", self.human_readable_event_name(), self.round_num)
     }
 }
 
