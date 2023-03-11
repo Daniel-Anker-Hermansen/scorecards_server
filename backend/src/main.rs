@@ -139,7 +139,7 @@ async fn round(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, path: Path<(String, 
     let session = lock.session_mut(cookie.value()).unwrap();
     let wcif = session.wcif_mut(&competition_id).await;
     let delegates = wcif.reg_ids_of_delegates();
-    let (competitors, names) = wca_scorecards_lib::wcif::get_competitors_for_round(wcif, &event_id, round_no);
+    let (competitors, names) = wca_scorecards_lib::wcif::wca_live_get_competitors_for_round(wcif, &event_id, round_no);
     // Couple of bad lines needed because of some stuff using usize and some using u64
     let delegates_u64 = delegates.into_iter().map(|x| x as u64).collect();
     let competitors_u64 = competitors.into_iter().map(|x| x as u64).collect();
