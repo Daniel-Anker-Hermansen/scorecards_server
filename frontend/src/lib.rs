@@ -51,10 +51,8 @@ fn make_groups(competitors: Vec<u64>, delegates: Vec<u64>, stages: u64, stations
 fn distribution(mut remaining: u64, no_of_groups: u64) -> Vec<u64> {
     (0..no_of_groups).map(|group| {
             let per_group = remaining / (no_of_groups - group);
-            let rem = remaining % (no_of_groups - group);
-            let res = per_group + if rem > 0 { 1 } else { 0 };
-            remaining -= res;
-            res
+            remaining -= per_group;
+            per_group
         }).collect()
 }
 
