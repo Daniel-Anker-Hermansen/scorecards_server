@@ -8,7 +8,7 @@ use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde::Deserialize;
-use tokio::{sync::Mutex, join, time::interval};
+use tokio::{sync::Mutex, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 use scorecard_to_pdf::Return;
 
@@ -234,7 +234,7 @@ async fn pkg(path: Path<String>, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
 async fn main() {
     let config_path = args().nth(1).expect("Missing config_path argument");
     let config_data = read_to_string(config_path).expect("Config file is not valid utf8");
-    let config: Config = toml::from_str(&config_data).unwrap();
+    let config: Config = toml::from_str(&config_data).expect("Config file is not valid config toml");
 
     let public = config.public_pem_path.clone();
     let private = config.private_pem_path.clone();
@@ -252,8 +252,18 @@ async fn main() {
                 .service(round)
                 .app_data(Data::new(db_arc))
         });
+    
+    tokio::task::spawn(async move {
+        let mut interval = interval(Duration::from_secs(600));
+        loop {
+            interval.tick().await;
+            let mut lock = db.lock().await;
+            lock.clean();
+            drop(lock);
+        }
+    });
 
-    let future = async { if let (Some(public), Some(private)) = (public, private) {
+    if let (Some(public), Some(private)) = (public, private) {
         let public_data = read_to_string(&public).unwrap();
         let mut cursor = Cursor::new(public_data);
         let pem = certs(&mut cursor).unwrap();
@@ -270,8 +280,7 @@ async fn main() {
             .with_single_cert(vec![certificate], private_key)
             .unwrap();
 
-        server
-            .bind_rustls(("127.0.0.1", 8080), server_config)
+        server.bind_rustls(("127.0.0.1", 8080), server_config)
             .unwrap()
             .run()
             .await
@@ -284,17 +293,5 @@ async fn main() {
             .run()
             .await
             .unwrap();
-    }};
-
-    let garbage_collecter = async move {
-        let mut interval = interval(Duration::from_secs(600));
-        loop {
-            interval.tick().await;
-            let mut lock = db.lock().await;
-            lock.clean();
-            drop(lock);
-        }
-    };
-
-    join!(future, garbage_collecter);
+    }
 }
