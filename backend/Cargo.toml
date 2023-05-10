@@ -16,3 +16,4 @@ actix-web = { version = "4.3.0", features = ["rustls"] }
 common = { path = "../common" }
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
+chrono = "0.4.24"

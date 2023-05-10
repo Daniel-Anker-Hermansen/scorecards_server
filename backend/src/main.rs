@@ -3,6 +3,7 @@ mod html;
 
 use std::{env::args, fs::read_to_string, io::Cursor, sync::Arc, time::Duration};
 use actix_web::{web::{Data, Query, Path}, Responder, get, HttpServer, App, http::StatusCode, body::MessageBody, dev::Response, HttpRequest, cookie::{Cookie, time}, HttpResponse};
+use chrono::{DateTime, Utc, TimeZone};
 use common::{Competitors,RoundInfo, PdfRequest, from_base_64};
 use db::DB;
 use rustls::{ServerConfig, PrivateKey, Certificate};
@@ -84,11 +85,16 @@ async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<Cod
         },
     };
 
+    let now = Utc::now();
+
     let my_competitions = lock.session_mut(&auth_code)
         .expect("Cookie is not expired")
         .oauth_mut()
         .get_competitions_managed_by_me()
-        .await; 
+        .await
+        .into_iter()
+        .filter(|c| date_from_string(&c.start_date) + chrono::Duration::days(7) > now)
+        .collect();
 
     let body = html::validated(my_competitions);
 
@@ -96,6 +102,11 @@ async fn validated(http: HttpRequest, db: Data<Arc<Mutex<DB>>>, query: Query<Cod
         .content_type("html")
         .message_body(MessageBody::boxed(body))
         .unwrap()
+}
+
+fn date_from_string(date: &str) -> DateTime<Utc> {
+    let iter: Vec<_> = date.split('-').collect();
+    Utc.with_ymd_and_hms(iter[0].parse().unwrap(), iter[1].parse().unwrap(), iter[2].parse().unwrap(), 0, 0, 0).unwrap()
 }
 
 #[get("/{competition_id}")]
