@@ -59,10 +59,16 @@ async fn root(http: HttpRequest, db: Data<Arc<Mutex<DB>>>) -> impl Responder {
         .unwrap()
 }
 
+#[get("/favicon.ico")]
+async fn favicon() -> impl Responder {
+    HttpResponse::build(StatusCode::OK)
+        .content_type("image/jpg").body(&include_bytes!("../../frontend/favicon.ico")[..])
+}
+
 #[get("/css")]
 async fn css() -> impl Responder {
     HttpResponse::build(StatusCode::OK)
-    .content_type("text/css").body(include_str!("../../frontend/html_src/style.css"))
+        .content_type("text/css").body(include_str!("../../frontend/html_src/style.css"))
 }
 
 #[derive(Deserialize)]
@@ -255,6 +261,7 @@ async fn main() {
             let db_arc = db_arc.clone();
             App::new()
                 .service(root)
+                .service(favicon)
                 .service(css)
                 .service(validated)
                 .service(pkg)
