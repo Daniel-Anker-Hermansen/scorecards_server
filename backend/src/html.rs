@@ -15,7 +15,7 @@ pub fn validated(competitions: Vec<Competition>) -> String {
     VALIDATED.replace("COMPETITIONS", &inner)
 }
 
-pub fn rounds(rounds: Vec<RoundInfo>,competition_id:&str) -> String {
+pub fn rounds(rounds: Vec<RoundInfo>, competition_id: &str, stations: u64) -> String {
     let inner = rounds.into_iter()
         .flat_map(|round| 
             {
@@ -30,7 +30,7 @@ pub fn rounds(rounds: Vec<RoundInfo>,competition_id:&str) -> String {
             name = round.print_name()?))})
         .collect::<Vec<_>>()
         .join("\n");
-    ROUNDS.replace("ROUNDS", &inner)
+    ROUNDS.replace("ROUNDS", &inner).replace("STATIONS", &stations.to_string())
 }
 
 pub fn group(competitors: Competitors) -> String {

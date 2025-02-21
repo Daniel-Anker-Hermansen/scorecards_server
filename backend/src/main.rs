@@ -195,13 +195,19 @@ async fn competition(
             let round_num = event_round_split.next().unwrap()[1..].parse().unwrap();
             RoundInfo {
                 event: event.to_owned(),
-                round_num: round_num,
+                round_num,
                 groups_exist: wcif.detect_round_groups_exist(event, round_num as usize),
             }
         })
         .collect();
 
-    let body = html::rounds(rounds, &wcif.get().id);
+    let stations = wcif.get().extensions.iter().find(|ext| ext.get("id") == Some(&serde_json::Value::String("dve.CompetitionConfig".to_string())))
+        .and_then(|ext| ext.get("data"))
+        .and_then(|data| data.get("stations"))
+        .and_then(|stations| stations.as_u64())
+        .unwrap_or(10);
+
+    let body = html::rounds(rounds, &wcif.get().id, stations);
     let mut builder = HttpResponse::build(StatusCode::OK);
     builder
         .content_type("html")
