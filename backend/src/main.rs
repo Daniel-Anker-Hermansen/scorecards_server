@@ -4,23 +4,20 @@ mod html;
 use axum::{
 	body::Body,
 	extract::{Path, Query, Request, State},
+	handler::Handler,
 	http::{Response, StatusCode},
 	response::IntoResponse,
-	routing::get,
+	routing::{get, MethodRouter},
 	Router,
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use chrono::{DateTime, TimeZone, Utc};
 use common::{from_base_64, Competitors, PdfRequest, RoundInfo};
 use db::DB;
+use futures::FutureExt;
 use scorecard_to_pdf::Return;
 use serde::Deserialize;
-use std::{
-	env::args,
-	fs::read_to_string,
-	io::Write,
-	sync::Arc,
-};
+use std::{convert::Infallible, env::args, fs::read_to_string, io::Write, panic::AssertUnwindSafe, sync::Arc};
 use tokio::{sync::Mutex, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 
@@ -30,8 +27,6 @@ struct Config {
 	client_secret: String,
 	redirect_uri: String,
 	auth_url: String,
-	public_pem_path: Option<String>,
-	private_pem_path: Option<String>,
 	pkg_path: String,
 }
 
@@ -47,31 +42,6 @@ fn create_cookie(code: &str) -> Cookie {
 		.max_age(time::Duration::hours(1))
 		.build()
 }
-
-/*
-async fn catch<F, T>(future: F) -> impl IntoResponse
-where
-	T: IntoResponse,
-	F: Future<Output = T> + UnwindSafe,
-{
-	match future.catch_unwind().await {
-		Ok(r) => r,
-		Err(e) => {
-			let error = panic_message::panic_message(&e);
-			HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR)
-				.content_type("text/plain")
-				.message_body(MessageBody::boxed(error.to_string()))
-				.unwrap()
-		}
-	}
-}
-
-macro_rules! catch {
-    ($($t:tt) *) => {
-        AssertUnwindSafe( $($t)* ).await
-    };
-}
-*/
 
 async fn root(db: State<Arc<Mutex<DB>>>, http: Request) -> impl IntoResponse {
 	let lock = db.lock().await;
@@ -333,6 +303,31 @@ async fn pkg(path: Path<String>, db: State<Arc<Mutex<DB>>>) -> Response<Body> {
 		.unwrap()
 }
 
+fn get_catch<H, T, S>(handler: H) -> MethodRouter<S, Infallible>
+where
+	H: Handler<T, S>,
+	T: 'static,
+	S: Clone + Send + Sync + 'static,
+{
+	let wrapper = async |state: State<S>, req: Request| {
+
+		let ret = AssertUnwindSafe(handler.call(req, state.0)).catch_unwind();
+		match ret.await {
+    Ok(response) => response,
+    Err(err) => {
+	let error = panic_message::panic_message(&err);
+	Response::builder()
+		.status(StatusCode::INTERNAL_SERVER_ERROR)
+		.header("Content-Type", "text/html")
+		.body(Body::from(format!("<p> The server panicked while handling the request </p> <p> The panic message was: </p> <p>{}</p>", error)))
+		.unwrap()
+    },
+}
+
+	};
+	get(wrapper)
+}
+
 #[tokio::main]
 async fn main() {
 	let file = std::sync::Mutex::new(std::fs::File::create("panic_log").unwrap());
@@ -358,14 +353,14 @@ async fn main() {
 
 	let db = Arc::new(Mutex::new(DB::new(config.clone())));
 	let router = Router::new()
-		.route("/", get(root))
-		.route("/favicon.ico", get(favicon))
-		.route("/css", get(css))
-		.route("/validated", get(validated))
-		.route("/{competition_id}", get(competition))
-		.route("/{competition_id}/{event_id}/{round_no}", get(round))
-		.route("/pdf", get(pdf))
-		.route("/pkg/{*file}", get(pkg))
+		.route("/", get_catch(root))
+		.route("/favicon.ico", get_catch(favicon))
+		.route("/css", get_catch(css))
+		.route("/validated", get_catch(validated))
+		.route("/{competition_id}", get_catch(competition))
+		.route("/{competition_id}/{event_id}/{round_no}", get_catch(round))
+		.route("/pdf", get_catch(pdf))
+		.route("/pkg/{*file}", get_catch(pkg))
 		.with_state(db.clone());
 
 	tokio::task::spawn(async move {
@@ -382,7 +377,4 @@ async fn main() {
 		.await
 		.unwrap();
 	axum::serve(listener, router).await.unwrap();
-
-	// let public = config.public_pem_path.clone();
-	// let private = config.private_pem_path.clone();
 }
