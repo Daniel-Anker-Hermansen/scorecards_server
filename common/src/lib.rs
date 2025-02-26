@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 
-use base64::{engine::{GeneralPurpose, GeneralPurposeConfig}, alphabet::URL_SAFE, Engine};
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use base64::{
+    alphabet::URL_SAFE,
+    engine::{GeneralPurpose, GeneralPurposeConfig},
+    Engine,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Competitors {
@@ -18,7 +22,7 @@ pub struct Competitors {
 #[derive(Serialize, Deserialize)]
 pub struct RoundInfo {
     pub event: String,
-    pub round_num: u8, 
+    pub round_num: u8,
     pub groups_exist: bool,
 }
 
@@ -46,7 +50,11 @@ impl RoundInfo {
     }
 
     pub fn print_name(&self) -> Option<String> {
-        Some(format!("{}, Round {}", self.human_readable_event_name()?, self.round_num))
+        Some(format!(
+            "{}, Round {}",
+            self.human_readable_event_name()?,
+            self.round_num
+        ))
     }
 }
 
@@ -61,14 +69,29 @@ pub struct PdfRequest {
     pub round: u64,
 }
 
-pub fn to_base_64<T>(data: T) -> String where T: Serialize {
+pub fn to_base_64<T>(data: T) -> String
+where
+    T: Serialize,
+{
     let bytes = postcard::to_allocvec(&data).unwrap();
     let engine = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new());
-    engine.encode(bytes) 
+    engine.encode(bytes)
 }
 
-pub fn from_base_64<T>(base64: &str) -> T where T: DeserializeOwned { 
+pub fn from_base_64<T>(base64: &str) -> T
+where
+    T: DeserializeOwned,
+{
     let engine = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new());
     let bytes = engine.decode(base64).unwrap();
     postcard::from_bytes(&bytes).unwrap()
+}
+
+pub fn try_from_base_64<T>(base64: &str) -> Option<T>
+where
+    T: DeserializeOwned,
+{
+    let engine = GeneralPurpose::new(&URL_SAFE, GeneralPurposeConfig::new());
+    let bytes = engine.decode(base64).ok()?;
+    postcard::from_bytes(&bytes).ok()
 }

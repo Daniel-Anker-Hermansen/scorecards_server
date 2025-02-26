@@ -5,19 +5,22 @@ use axum::{
 	body::Body,
 	extract::{Path, Query, Request, State},
 	handler::Handler,
-	http::{Response, StatusCode},
-	response::IntoResponse,
+	http::{HeaderValue, Response, StatusCode},
+	response::{IntoResponse, Redirect},
 	routing::{get, MethodRouter},
 	Router,
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use chrono::{DateTime, TimeZone, Utc};
-use common::{from_base_64, Competitors, PdfRequest, RoundInfo};
+use common::{from_base_64, to_base_64, Competitors, PdfRequest, RoundInfo};
 use db::DB;
 use futures::FutureExt;
 use scorecard_to_pdf::Return;
 use serde::Deserialize;
-use std::{convert::Infallible, env::args, fs::read_to_string, io::Write, panic::AssertUnwindSafe, sync::Arc};
+use std::{
+	any::Any, convert::Infallible, env::args, fs::read_to_string, io::Write,
+	panic::AssertUnwindSafe, sync::Arc,
+};
 use tokio::{sync::Mutex, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 
@@ -26,7 +29,6 @@ struct Config {
 	client_id: String,
 	client_secret: String,
 	redirect_uri: String,
-	auth_url: String,
 	pkg_path: String,
 }
 
@@ -43,6 +45,14 @@ fn create_cookie(code: &str) -> Cookie {
 		.build()
 }
 
+fn redirect_cookie(uri: &str) -> Cookie {
+	Cookie::build(Cookie::new("rediect", uri))
+		.secure(true)
+		.http_only(true)
+		.max_age(time::Duration::hours(1))
+		.build()
+}
+
 async fn root(db: State<Arc<Mutex<DB>>>, http: Request) -> impl IntoResponse {
 	let lock = db.lock().await;
 	let body = match get_cookie(&http) {
@@ -50,10 +60,9 @@ async fn root(db: State<Arc<Mutex<DB>>>, http: Request) -> impl IntoResponse {
 			"<script>window.location.href=\"validated\"</script>".to_string()
 		}
 		_ => {
-			let config = lock.config();
 			format!(
 				"<script>window.location.href=\"{}\"</script>",
-				&config.auth_url
+				lock.auth_url(),
 			)
 		}
 	};
@@ -303,27 +312,69 @@ async fn pkg(path: Path<String>, db: State<Arc<Mutex<DB>>>) -> Response<Body> {
 		.unwrap()
 }
 
-fn get_catch<H, T, S>(handler: H) -> MethodRouter<S, Infallible>
-where
-	H: Handler<T, S>,
-	T: 'static,
-	S: Clone + Send + Sync + 'static,
-{
-	let wrapper = async |state: State<S>, req: Request| {
-
-		let ret = AssertUnwindSafe(handler.call(req, state.0)).catch_unwind();
-		match ret.await {
-    Ok(response) => response,
-    Err(err) => {
+fn internal_server_error(err: Box<dyn Any + Send + 'static>) -> Response<Body> {
 	let error = panic_message::panic_message(&err);
+	let data = format!("<p> The server panicked while handling the request </p> <p> The panic message was: </p> <p>{}</p>", error);
 	Response::builder()
 		.status(StatusCode::INTERNAL_SERVER_ERROR)
 		.header("Content-Type", "text/html")
-		.body(Body::from(format!("<p> The server panicked while handling the request </p> <p> The panic message was: </p> <p>{}</p>", error)))
+		.body(Body::from(data))
 		.unwrap()
-    },
 }
 
+async fn login(db: State<Arc<Mutex<DB>>>) -> Response<Body> {
+	Response::builder()
+		.status(StatusCode::OK)
+		.header("Content-Type", "text/html")
+		.body(Body::new(format!(
+			"<a href = \"{}\"> Log in with WCA</a>",
+			db.lock().await.auth_url()
+		)))
+		.unwrap()
+}
+
+async fn redircet_login(req: Request) -> Response<Body> {
+	let mut raw_path_and_query = req.uri().path().to_string();
+	if let Some(query) = req.uri().query() {
+		raw_path_and_query.push('?');
+		raw_path_and_query.push_str(query);
+	}
+	let path_and_query = to_base_64(&raw_path_and_query);
+	let mut response = Redirect::to("/login").into_response();
+	let cookie = redirect_cookie(&path_and_query);
+	let cookie = format!("{}", cookie);
+	response
+		.headers_mut()
+		.insert("Set-Cookie", HeaderValue::from_str(&cookie).unwrap());
+	response
+}
+
+fn auth<H, T>(handler: H) -> MethodRouter<Arc<Mutex<DB>>, Infallible>
+where
+	H: Handler<T, Arc<Mutex<DB>>>,
+	T: 'static,
+{
+	let wrapper = async |state: State<Arc<Mutex<DB>>>, req: Request| match get_cookie(&req) {
+		Some(cookie) if state.0.lock().await.session_exists(cookie.value()) => {
+			handler.call(req, state.0).await
+		}
+		_ => redircet_login(req).await,
+	};
+	get(wrapper)
+}
+
+fn get_catch<H, T>(handler: H) -> MethodRouter<Arc<Mutex<DB>>, Infallible>
+where
+	H: Handler<T, Arc<Mutex<DB>>>,
+	T: 'static,
+{
+	let wrapper = async |state: State<Arc<Mutex<DB>>>, req: Request| {
+		dbg!(req.uri());
+		let ret = AssertUnwindSafe(handler.call(req, state.0)).catch_unwind();
+		match ret.await {
+			Ok(response) => response,
+			Err(err) => internal_server_error(err),
+		}
 	};
 	get(wrapper)
 }
@@ -353,13 +404,17 @@ async fn main() {
 
 	let db = Arc::new(Mutex::new(DB::new(config.clone())));
 	let router = Router::new()
-		.route("/", get_catch(root))
+		.route("/", get_catch(auth(root)))
 		.route("/favicon.ico", get_catch(favicon))
 		.route("/css", get_catch(css))
 		.route("/validated", get_catch(validated))
-		.route("/{competition_id}", get_catch(competition))
-		.route("/{competition_id}/{event_id}/{round_no}", get_catch(round))
-		.route("/pdf", get_catch(pdf))
+		.route("/login", get_catch(login))
+		.route("/{competition_id}", get_catch(auth(competition)))
+		.route(
+			"/{competition_id}/{event_id}/{round_no}",
+			get_catch(auth(round)),
+		)
+		.route("/pdf", get_catch(auth(pdf)))
 		.route("/pkg/{*file}", get_catch(pkg))
 		.with_state(db.clone());
 
@@ -373,8 +428,6 @@ async fn main() {
 		}
 	});
 
-	let listener = tokio::net::TcpListener::bind("127.0.0.1:8080")
-		.await
-		.unwrap();
+	let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
 	axum::serve(listener, router).await.unwrap();
 }
