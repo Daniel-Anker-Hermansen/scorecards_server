@@ -5,12 +5,12 @@ const VALIDATED: &str = include_str!("../../frontend/html_src/validated.html");
 const ROUNDS: &str = include_str!("../../frontend/html_src/competition_rounds.html");
 const GROUP: &str = include_str!("../../frontend/html_src/group.html");
 
-pub fn validated(competitions: Vec<Competition>) -> String {
+pub fn root(competitions: Vec<Competition>) -> String {
 	let inner = competitions
 		.into_iter()
 		.map(|competition| {
 			format!(
-				"<a class =  \"style_list\" href = \"/{}\"><text>{}</text></a>",
+				"<a class =  \"style_list\" href = \"{}\"><text>{}</text></a>",
 				competition.id(),
 				competition.name()
 			)
@@ -30,7 +30,7 @@ pub fn rounds(rounds: Vec<RoundInfo>, competition_id: &str, stations: u64) -> St
 				"style_list"
 			};
 			let data = format!(
-				"<a class =  \"{}\" onclick = redirect(\"/{}/{}/{}\")><text>{}</text></a>",
+				"<a class =  \"{}\" onclick = redirect(\"{}/{}/{}\")><text>{}</text></a>",
 				class_style,
 				competition_id,
 				round.event,

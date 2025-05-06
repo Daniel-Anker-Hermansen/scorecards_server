@@ -1,7 +1,7 @@
 [package]
 name = "backend"
 version = "0.1.1"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -19,7 +19,7 @@ chrono = "0.4.24"
 futures = "0.3.30"
 panic-message = "0.3.0"
 serde_json = "1.0.139"
-axum = { version = "0.8.1", features = ["macros"] }
+axum = "0.8.1"
 axum-extra = { version = "0.10.0", features = ["cookie"] }
 time = "0.3.37"
 urlencoding = "2.1.3"

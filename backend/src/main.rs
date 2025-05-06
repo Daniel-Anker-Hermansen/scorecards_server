@@ -2,17 +2,17 @@ mod db;
 mod html;
 
 use axum::{
+	Router,
 	body::Body,
 	extract::{Path, Query, Request, State},
 	handler::Handler,
 	http::{HeaderValue, Response, StatusCode},
 	response::{IntoResponse, Redirect},
-	routing::{get, MethodRouter},
-	Router,
+	routing::{MethodRouter, get},
 };
-use axum_extra::extract::{cookie::Cookie, CookieJar};
+use axum_extra::extract::{CookieJar, cookie::Cookie};
 use chrono::{DateTime, TimeZone, Utc};
-use common::{from_base_64, to_base_64, Competitors, PdfRequest, RoundInfo};
+use common::{Competitors, PdfRequest, RoundInfo, from_base_64, to_base_64};
 use db::DB;
 use futures::FutureExt;
 use scorecard_to_pdf::Return;
@@ -24,12 +24,13 @@ use std::{
 use tokio::{sync::Mutex, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 
-#[derive(Deserialize, Debug, Clone)]
+[derive(Deserialize, Debug, Clone)]
 struct Config {
 	client_id: String,
 	client_secret: String,
 	redirect_uri: String,
 	pkg_path: String,
+	port: Option<u16>,
 }
 
 fn get_cookie(http: &Request) -> Option<Cookie<'static>> {
@@ -46,31 +47,47 @@ fn create_cookie(code: &str) -> Cookie {
 }
 
 fn redirect_cookie(uri: &str) -> Cookie {
-	Cookie::build(Cookie::new("rediect", uri))
+	Cookie::build(Cookie::new("redirect", uri))
 		.secure(true)
 		.http_only(true)
 		.max_age(time::Duration::hours(1))
 		.build()
 }
 
-async fn root(db: State<Arc<Mutex<DB>>>, http: Request) -> impl IntoResponse {
-	let lock = db.lock().await;
-	let body = match get_cookie(&http) {
-		Some(v) if lock.session_exists(v.value()) => {
-			"<script>window.location.href=\"validated\"</script>".to_string()
-		}
-		_ => {
-			format!(
-				"<script>window.location.href=\"{}\"</script>",
-				lock.auth_url(),
-			)
-		}
+#[derive(Deserialize)]
+struct CodeReceiver {
+	code: Option<String>,
+}
+
+async fn validated(
+	db: State<Arc<Mutex<DB>>>,
+	query: Query<CodeReceiver>,
+
+	http: Request,
+) -> Response<Body> {
+	let mut lock = db.lock().await;
+	let set_cookie = match get_cookie(&http) {
+		Some(cookie) if lock.session_exists(cookie.value()) => None,
+		_ => match query.0.code {
+			Some(code) => {
+				let cookie = create_cookie(&code);
+				lock.insert_session(code.clone()).await;
+				Some(format!("{}", cookie))
+			}
+			None => return redircet_login(None).await,
+		},
 	};
-	Response::builder()
-		.status(StatusCode::OK)
-		.header("Content-Type", "text/html")
-		.body(body)
-		.unwrap()
+	let redirect = CookieJar::from_headers(http.headers())
+		.get("redirect")
+		.map(|cookie| from_base_64::<String>(cookie.value()))
+		.unwrap_or("/".to_string());
+	let mut response = Redirect::to(&redirect).into_response();
+	if let Some(set_cookie) = set_cookie {
+		response
+			.headers_mut()
+			.insert("Set-Cookie", HeaderValue::from_str(&set_cookie).unwrap());
+	}
+	response
 }
 
 async fn favicon() -> impl IntoResponse {
@@ -91,34 +108,14 @@ async fn css() -> impl IntoResponse {
 		.unwrap()
 }
 
-#[derive(Deserialize)]
-struct CodeReceiver {
-	code: Option<String>,
-}
-
-async fn validated(
-	db: State<Arc<Mutex<DB>>>,
-	query: Query<CodeReceiver>,
-	http: Request,
-) -> impl IntoResponse {
-	let cookie = get_cookie(&http);
+async fn root(db: State<Arc<Mutex<DB>>>, http: Request) -> impl IntoResponse {
+	let cookie = get_cookie(&http).unwrap();
 	let mut lock = db.lock().await;
-	let (builder, auth_code) = match cookie {
-		Some(v) if lock.session_exists(v.value()) => (Response::builder(), v.value().to_owned()),
-		_ => {
-			lock.insert_session(query.code.clone().unwrap()).await;
-			let cookie = create_cookie(query.code.as_ref().unwrap());
-			(
-				Response::builder().header("Set-Cookie", format!("{}", cookie)),
-				query.code.as_ref().unwrap().clone(),
-			)
-		}
-	};
-
+	let builder = Response::builder();
+	let auth_code = cookie.value();
 	let now = Utc::now();
-
 	let my_competitions = lock
-		.session_mut(&auth_code)
+		.session_mut(auth_code)
 		.expect("Cookie is not expired")
 		.oauth_mut()
 		.get_competitions_managed_by_me()
@@ -127,7 +124,7 @@ async fn validated(
 		.filter(|c| date_from_string(&c.start_date) + chrono::Duration::days(7) > now)
 		.collect();
 
-	let body = html::validated(my_competitions);
+	let body = html::root(my_competitions);
 
 	builder
 		.status(StatusCode::OK)
@@ -248,7 +245,6 @@ struct PdfRequest64 {
 	data: String,
 }
 
-#[axum::debug_handler]
 async fn pdf(
 	query: Query<PdfRequest64>,
 	db: State<Arc<Mutex<DB>>>,
@@ -314,7 +310,10 @@ async fn pkg(path: Path<String>, db: State<Arc<Mutex<DB>>>) -> Response<Body> {
 
 fn internal_server_error(err: Box<dyn Any + Send + 'static>) -> Response<Body> {
 	let error = panic_message::panic_message(&err);
-	let data = format!("<p> The server panicked while handling the request </p> <p> The panic message was: </p> <p>{}</p>", error);
+	let data = format!(
+		"<p> The server panicked while handling the request </p> <p> The panic message was: </p> <p>{}</p>",
+		error
+	);
 	Response::builder()
 		.status(StatusCode::INTERNAL_SERVER_ERROR)
 		.header("Content-Type", "text/html")
@@ -333,19 +332,21 @@ async fn login(db: State<Arc<Mutex<DB>>>) -> Response<Body> {
 		.unwrap()
 }
 
-async fn redircet_login(req: Request) -> Response<Body> {
-	let mut raw_path_and_query = req.uri().path().to_string();
-	if let Some(query) = req.uri().query() {
-		raw_path_and_query.push('?');
-		raw_path_and_query.push_str(query);
-	}
-	let path_and_query = to_base_64(&raw_path_and_query);
+async fn redircet_login(req: Option<Request>) -> Response<Body> {
 	let mut response = Redirect::to("/login").into_response();
-	let cookie = redirect_cookie(&path_and_query);
-	let cookie = format!("{}", cookie);
-	response
-		.headers_mut()
-		.insert("Set-Cookie", HeaderValue::from_str(&cookie).unwrap());
+	if let Some(req) = req {
+		let mut raw_path_and_query = req.uri().path().to_string();
+		if let Some(query) = req.uri().query() {
+			raw_path_and_query.push('?');
+			raw_path_and_query.push_str(query);
+		}
+		let path_and_query = to_base_64(&raw_path_and_query);
+		let cookie = redirect_cookie(&path_and_query);
+		let cookie = format!("{}", cookie);
+		response
+			.headers_mut()
+			.insert("Set-Cookie", HeaderValue::from_str(&cookie).unwrap());
+	}
 	response
 }
 
@@ -354,11 +355,20 @@ where
 	H: Handler<T, Arc<Mutex<DB>>>,
 	T: 'static,
 {
-	let wrapper = async |state: State<Arc<Mutex<DB>>>, req: Request| match get_cookie(&req) {
-		Some(cookie) if state.0.lock().await.session_exists(cookie.value()) => {
-			handler.call(req, state.0).await
+	let wrapper = async |state: State<Arc<Mutex<DB>>>, req: Request| {
+		let ret = AssertUnwindSafe(async {
+			match get_cookie(&req) {
+				Some(cookie) if state.0.lock().await.session_exists(cookie.value()) => {
+					handler.call(req, state.0).await
+				}
+				_ => redircet_login(Some(req)).await,
+			}
+		})
+		.catch_unwind();
+		match ret.await {
+			Ok(response) => response,
+			Err(err) => internal_server_error(err),
 		}
-		_ => redircet_login(req).await,
 	};
 	get(wrapper)
 }
@@ -369,7 +379,6 @@ where
 	T: 'static,
 {
 	let wrapper = async |state: State<Arc<Mutex<DB>>>, req: Request| {
-		dbg!(req.uri());
 		let ret = AssertUnwindSafe(handler.call(req, state.0)).catch_unwind();
 		match ret.await {
 			Ok(response) => response,
@@ -404,17 +413,14 @@ async fn main() {
 
 	let db = Arc::new(Mutex::new(DB::new(config.clone())));
 	let router = Router::new()
-		.route("/", get_catch(auth(root)))
+		.route("/", auth(root))
 		.route("/favicon.ico", get_catch(favicon))
 		.route("/css", get_catch(css))
 		.route("/validated", get_catch(validated))
 		.route("/login", get_catch(login))
-		.route("/{competition_id}", get_catch(auth(competition)))
-		.route(
-			"/{competition_id}/{event_id}/{round_no}",
-			get_catch(auth(round)),
-		)
-		.route("/pdf", get_catch(auth(pdf)))
+		.route("/{competition_id}", auth(competition))
+		.route("/{competition_id}/{event_id}/{round_no}", auth(round))
+		.route("/pdf", auth(pdf))
 		.route("/pkg/{*file}", get_catch(pkg))
 		.with_state(db.clone());
 
@@ -428,6 +434,7 @@ async fn main() {
 		}
 	});
 
-	let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+	let address = format!("0.0.0.0:{}", config.port.unwrap_or(8080));
+	let listener = tokio::net::TcpListener::bind(address).await.unwrap();
 	axum::serve(listener, router).await.unwrap();
 }

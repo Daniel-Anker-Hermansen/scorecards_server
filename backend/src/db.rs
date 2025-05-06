@@ -34,7 +34,11 @@ impl DB {
 
 	pub fn auth_url(&self) -> String {
 		let config = self.config();
-		format!("https://www.worldcubeassociation.org/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=manage_competitions", config.client_id, urlencoding::encode(&config.redirect_uri))
+		format!(
+			"https://www.worldcubeassociation.org/oauth/authorize?client_id={}&redirect_uri={}&response_type=code&scope=manage_competitions",
+			config.client_id,
+			urlencoding::encode(&config.redirect_uri)
+		)
 	}
 
 	pub async fn insert_session(&mut self, auth_code: String) {

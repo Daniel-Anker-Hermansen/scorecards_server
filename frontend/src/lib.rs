@@ -168,7 +168,7 @@ fn redraw_round_config() -> Result<(), Error> {
 	let submit = document().create_element("button")?;
 	submit.set_text_content(Some("Submit!"));
 	let closure = Closure::once(submit_on_click);
-	submit.add_event_listener_with_callback("click", &closure.into_js_value().unchecked_ref())?;
+	submit.add_event_listener_with_callback("click", closure.into_js_value().unchecked_ref())?;
 	let document = document();
 	let input: HtmlInputElement = document.create_element("input")?.dyn_into().unwrap();
 	input.set_id("checkbox");
