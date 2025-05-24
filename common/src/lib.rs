@@ -13,6 +13,7 @@ pub struct Competitors {
     pub stations: u64,
     pub event: String,
     pub round: u64,
+    pub seperate_stages: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -59,6 +60,7 @@ pub struct PdfRequest {
     pub wcif: bool,
     pub event: String,
     pub round: u64,
+    pub seperate_stages: bool,
 }
 
 pub fn to_base_64<T>(data: T) -> String where T: Serialize {

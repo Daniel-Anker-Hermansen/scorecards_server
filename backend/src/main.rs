@@ -219,6 +219,7 @@ async fn competition(
 struct StagesQuery {
     stages: u64,
     stations: u64,
+    seperate_stages: bool,
 }
 
 #[get("/{competition_id}/{event_id}/{round_no}")]
@@ -253,6 +254,7 @@ async fn round(
         stations: stages.stations,
         event: event_id,
         round: round_no as u64,
+	seperate_stages: stages.seperate_stages,
     };
 
     let body = html::group(comp_struct);
@@ -276,7 +278,7 @@ async fn pdf(
 ) -> impl Responder {
     catch!(
     let pdf_request: PdfRequest = from_base_64(&query.into_inner().data);
-    let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32);
+    let stages = Stages::new(pdf_request.stages as u32, pdf_request.stations as u32, pdf_request.seperate_stages);
     let cookie = get_cookie(&http).unwrap();
     let auth_code = cookie.value();
     let mut lock = db.lock().await;

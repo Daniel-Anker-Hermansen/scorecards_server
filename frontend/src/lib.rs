@@ -23,6 +23,7 @@ pub fn start(base_64: &str) {
         names: competitor_info.names,
         event: competitor_info.event,
         round: competitor_info.round,
+	seperate_stages: competitor_info.seperate_stages,
     };
     unsafe {
         ROUND_CONFIG = Some(Arc::new(Mutex::new(round_config)));
@@ -65,6 +66,7 @@ struct RoundConfig {
     names: HashMap<u64, String>,
     event: String,
     round: u64,
+    seperate_stages: bool,
 }
 
 fn move_competitor(event: Event) {
@@ -176,10 +178,10 @@ fn submit_on_click() {
             wcif: checkbox.checked(),
             event: round_config.event.clone(),
             round: round_config.round,
+	    seperate_stages: round_config.seperate_stages,
         };
         let base64 = to_base_64(&pdf_request);
-        let url = format!("/pdf?data={base64}");
-
+        let url = format!("/pdf?data={base64}&wtf");
         let element: HtmlElement = document().create_element("a").unwrap().unchecked_into();
         element.set_attribute("href", &url).unwrap();
         document().get_element_by_id("main")
