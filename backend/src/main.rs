@@ -24,7 +24,7 @@ use std::{
 use tokio::{sync::Mutex, time::interval};
 use wca_scorecards_lib::{ScorecardOrdering, Stages};
 
-[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 struct Config {
 	client_id: String,
 	client_secret: String,
