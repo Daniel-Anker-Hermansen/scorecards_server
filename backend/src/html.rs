@@ -24,10 +24,12 @@ pub fn rounds(rounds: Vec<RoundInfo>, competition_id: &str, stations: u64) -> St
                 } else {
                     "style_list"
                 };
-                Some(format!("<a class =  \"{class_style}\" onclick = redirect(\"/{competition_id}/{event}/{round}\")><text>{name}</text></a>",
+                Some(format!("<a class =  \"{class_style}\" onclick = redirect(\"/{competition_id}/{event}/{round}\")><text>{name} ({entered}/{competitors})</text></a>",
             event = round.event,
             round = round.round_num,
-            name = round.print_name()?))})
+            name = round.print_name()?,
+	    entered = round.entered,
+	    competitors = round.competitors))})
         .collect::<Vec<_>>()
         .join("\n");
     ROUNDS.replace("ROUNDS", &inner).replace("STATIONS", &stations.to_string())

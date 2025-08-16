@@ -21,6 +21,8 @@ pub struct RoundInfo {
     pub event: String,
     pub round_num: u8, 
     pub groups_exist: bool,
+    pub entered: u64,
+    pub competitors: u64,
 }
 
 impl RoundInfo {
