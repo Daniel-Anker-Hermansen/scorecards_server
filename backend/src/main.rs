@@ -248,6 +248,7 @@ async fn round(
 
     let stages = query.into_inner();
 
+    let groups_exist = wcif.detect_round_groups_exist(&event_id, round_no);
     let comp_struct = Competitors {
         competition: competition_id,
         competitors: competitors_u64,
@@ -260,7 +261,7 @@ async fn round(
 	seperate_stages: stages.seperate_stages,
     };
 
-    let body = html::group(comp_struct);
+    let body = html::group(comp_struct, groups_exist);
     let mut builder = HttpResponse::build(StatusCode::OK);
     builder
         .content_type("html")

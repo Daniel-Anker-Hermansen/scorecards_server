@@ -35,6 +35,7 @@ pub fn rounds(rounds: Vec<RoundInfo>, competition_id: &str, stations: u64) -> St
     ROUNDS.replace("ROUNDS", &inner).replace("STATIONS", &stations.to_string())
 }
 
-pub fn group(competitors: Competitors) -> String {
-    GROUP.replace("DATA", &to_base_64(&competitors))
+pub fn group(competitors: Competitors, groups_exist: bool) -> String {
+    let intermediate = if groups_exist { GROUP.replace("ERROR", "Warning: This round already has groups patched. Make sure that you chose the correct group.")} else { GROUP.replace("ERROR", "")};
+    intermediate.replace("DATA", &to_base_64(&competitors))
 }
