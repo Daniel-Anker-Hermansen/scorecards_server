@@ -1,4 +1,0 @@
-called `Option::unwrap()` on a `None` value at file: src/main.rs line: 239, column: 52
-called `Option::unwrap()` on a `None` value at file: src/main.rs line: 186, column: 52
-called `Option::unwrap()` on a `None` value at file: src/main.rs line: 186, column: 52
-called `Result::unwrap()` on an `Err` value: Error("missing field `access_token`", line: 1, column: 213) at file: /home/daniel/.cargo/git/checkouts/wca_tools_lib-5819d788b3d4c58b/6445dfa/wca_oauth/src/oauth.rs line: 80, column: 75
